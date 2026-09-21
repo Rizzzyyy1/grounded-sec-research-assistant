@@ -1,0 +1,10 @@
+{
+  "config": "hybrid, hashing-512, BM25, auto filters, rerank off",
+  "metrics": {
+    "hit@8": 0.875,
+    "recall@8": 0.875,
+    "mrr": 0.567
+  },
+  "margin": 0.05,
+  "n_questions": 24
+}
