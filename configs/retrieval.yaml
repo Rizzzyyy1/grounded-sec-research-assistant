@@ -1,0 +1,32 @@
+# Named retrieval presets. Each one is validated against `RetrievalSettings`
+# (src/finsight/config/settings.py), so a typo or an unknown key fails at load time.
+#
+# The evaluation harness (Phase 5) sweeps these to build the ablation table in the README:
+#   finsight eval ablate --presets configs/retrieval.yaml
+presets:
+  dense_only:
+    mode: dense
+    rerank: false
+    final_k: 8
+
+  bm25_only:
+    mode: sparse
+    rerank: false
+    final_k: 8
+
+  hybrid:                   # the default: see docs/EVALUATION.md (ablation A1)
+    mode: hybrid
+    rerank: false
+    final_k: 8
+
+  hybrid_rerank:            # better ordering, ~16x slower: not the default
+    mode: hybrid
+    rerank: true
+    rerank_top_n: 30
+    final_k: 8
+
+  hybrid_rerank_wide:       # more context: higher recall, more tokens, more cost
+    mode: hybrid
+    rerank: true
+    rerank_top_n: 50
+    final_k: 12

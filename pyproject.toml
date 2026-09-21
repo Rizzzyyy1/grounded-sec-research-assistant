@@ -1,0 +1,254 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "finsight"
+version = "0.1.0"
+description = "Grounded, citation-first financial research assistant: hybrid RAG over SEC filings + deterministic XBRL analytics + a tool-using Claude agent, with a first-class evaluation harness."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Rizwan Ahmed" }]
+keywords = ["rag", "llm", "finance", "sec-edgar", "xbrl", "retrieval", "evaluation"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+
+# Core = everything needed to import the package, load config and run the CLI.
+# Heavy stacks live in extras so `pip install -e ".[dev]"` is fast.
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "structlog>=24.1",
+    "typer>=0.12",
+    "rich>=13.7",
+    "tenacity>=8.3",
+]
+
+[project.optional-dependencies]
+# Phase 1-2: data layer + parsing
+data = [
+    "httpx>=0.27",
+    "duckdb>=1.0",
+    "pandas>=2.2",
+    "pyarrow>=16",
+    "lxml>=5.2",
+    "beautifulsoup4>=4.12",
+    "tiktoken>=0.7",
+]
+# Phase 3: indexing + retrieval (ONNX runtime, no PyTorch needed)
+ml = [
+    "numpy>=1.26",
+    "fastembed>=0.3",
+    "qdrant-client>=1.9",
+    "bm25s>=0.2",
+]
+# Phase 4-6: generation + agent
+llm = ["anthropic>=1.0"]
+# Phase 5: evaluation + statistics
+eval = ["scipy>=1.13", "scikit-learn>=1.5", "matplotlib>=3.9"]
+# Analysis notebooks (executed with outputs committed)
+notebooks = ["nbformat>=5.10", "nbclient>=0.10", "ipykernel>=6.29", "matplotlib>=3.9"]
+# Phase 7: serving
+api = ["fastapi>=0.111", "uvicorn[standard]>=0.30", "sse-starlette>=2.1"]
+ui = ["streamlit>=1.36", "plotly>=5.22", "httpx>=0.27", "pandas>=2.2"]
+# Tooling
+dev = [
+    "pytest>=8.2",
+    "pytest-cov>=5.0",
+    "pytest-asyncio>=0.23",
+    "hypothesis>=6.100",
+    "respx>=0.21",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "import-linter>=2.0",
+    "types-PyYAML",
+    "pre-commit>=3.7",
+]
+all = ["finsight[data,ml,llm,eval,api,ui,notebooks]"]
+
+[project.scripts]
+finsight = "finsight.cli:app"
+
+[project.urls]
+Documentation = "https://github.com/your-username/finsight/tree/main/docs"
+Source = "https://github.com/your-username/finsight"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/finsight"]
+
+# --------------------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["notebooks", "data"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear
+    "UP",       # pyupgrade
+    "SIM",      # simplify
+    "C4",       # comprehensions
+    "PTH",      # pathlib
+    "RUF",      # ruff-specific
+    "S",        # bandit (security)
+    "T20",      # no stray print()
+    "PL",       # pylint subset
+    "ARG",      # unused arguments
+]
+ignore = [
+    "PLR0913",  # too many arguments: pydantic-style call sites are fine
+    "PLR2004",  # magic values: financial constants are self-explanatory in context
+    "S101",     # assert is fine in tests (re-enabled for src below)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "ARG", "PLR", "T20", "C408", "E501"]
+"src/finsight/cli.py" = ["T20", "PLR0917"]  # typer commands take many keyword options
+"src/finsight/generation/offline.py" = ["ARG002"]  # must match the LLMClient protocol
+"src/finsight/evaluation/gold_builder.py" = ["E501", "PLR0912", "PLR0915"]  # flat: one block per question family
+"src/finsight/analytics/ratios.py" = ["ARG005", "E501"]  # uniform (current, prior) lambdas
+"src/finsight/analytics/{risk_diff,sentiment}.py" = ["E501"]  # word-list literals
+"src/finsight/agent/*.py" = ["E501"]  # prompt text and wide answer templates
+"src/finsight/api/**" = ["E501"]  # wide keyword-argument constructors
+"src/finsight/evaluation/**" = ["S311"]  # seeded sampling / bootstrap, not cryptography
+"src/finsight/ui/**" = ["T20", "E501"]
+"scripts/**" = ["T20", "S311", "E501"]  # developer utilities: prints and seeded sampling are fine
+
+[tool.ruff.lint.isort]
+known-first-party = ["finsight"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# --------------------------------------------------------------------------- mypy
+[tool.mypy]
+# numpy's bundled stubs use 3.12-only syntax; the *source* is still held to 3.11 by ruff.
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+plugins = ["pydantic.mypy"]
+files = ["src/finsight"]
+
+[[tool.mypy.overrides]]
+# Third-party libs without (complete) type stubs.
+module = ["bm25s.*", "fastembed.*", "qdrant_client.*", "streamlit.*", "plotly.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# No usable inline types / stubs for these; they are treated as untyped.
+module = ["pandas.*", "duckdb.*", "lxml.*", "pyarrow.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# --------------------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config --import-mode=importlib"
+filterwarnings = [
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",  # starlette TestClient
+]
+asyncio_mode = "auto"
+markers = [
+    "unit: fast, hermetic tests (no network, no models, no API keys)",
+    "integration: touches local services or real (small) models",
+    "e2e: full pipeline runs; may need network and ANTHROPIC_API_KEY",
+    "network: requires internet access (SEC EDGAR)",
+    "llm: calls the Claude API and costs money",
+    "slow: takes more than a few seconds",
+]
+
+[tool.coverage.run]
+source = ["src/finsight"]
+branch = true
+omit = ["src/finsight/ui/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\."]
+
+# --- Architecture contracts (docs/ARCHITECTURE.md section 3); run with `lint-imports` -------------
+[tool.importlinter]
+root_package = "finsight"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: a package may import only from packages below it"
+type = "layers"
+layers = [
+    "finsight.cli",
+    "finsight.api",
+    "finsight.stack",
+    "finsight.evaluation",
+    "finsight.agent",
+    "finsight.generation",
+    "finsight.retrieval",
+    "finsight.indexing",
+    "finsight.processing | finsight.ingestion | finsight.analytics",
+    "finsight.config",
+    "finsight.core",
+]
+
+[[tool.importlinter.contracts]]
+name = "core imports nothing else from finsight"
+type = "forbidden"
+source_modules = ["finsight.core"]
+forbidden_modules = [
+    "finsight.config", "finsight.ingestion", "finsight.processing", "finsight.indexing",
+    "finsight.retrieval", "finsight.generation", "finsight.analytics", "finsight.agent",
+    "finsight.evaluation", "finsight.api", "finsight.ui", "finsight.stack", "finsight.cli",
+]
+
+[[tool.importlinter.contracts]]
+name = "analytics is pure: no internal imports except core, no I/O libraries"
+type = "forbidden"
+source_modules = ["finsight.analytics"]
+forbidden_modules = [
+    "finsight.config", "finsight.ingestion", "finsight.processing", "finsight.indexing",
+    "finsight.retrieval", "finsight.generation", "finsight.agent", "finsight.evaluation",
+    "finsight.api", "finsight.ui", "finsight.stack", "finsight.cli",
+    "duckdb", "qdrant_client", "httpx", "anthropic",
+]
+
+[[tool.importlinter.contracts]]
+name = "ingestion and processing never reach into the online plane"
+type = "forbidden"
+source_modules = ["finsight.ingestion", "finsight.processing"]
+forbidden_modules = [
+    "finsight.indexing", "finsight.retrieval", "finsight.generation", "finsight.agent",
+    "finsight.evaluation", "finsight.api", "finsight.ui",
+]
+
+[[tool.importlinter.contracts]]
+name = "ui is a pure HTTP client of the api (no finsight backend imports)"
+type = "forbidden"
+source_modules = ["finsight.ui"]
+forbidden_modules = [
+    "finsight.ingestion", "finsight.processing", "finsight.indexing", "finsight.retrieval",
+    "finsight.generation", "finsight.analytics", "finsight.agent", "finsight.evaluation",
+    "finsight.api", "finsight.stack", "finsight.cli", "duckdb", "qdrant_client", "anthropic",
+]
+
+[[tool.importlinter.contracts]]
+name = "Each heavy external dependency lives behind exactly one module"
+type = "forbidden"
+source_modules = ["finsight"]
+forbidden_modules = ["anthropic", "qdrant_client", "duckdb"]
+allow_indirect_imports = true
+ignore_imports = [
+    "finsight.generation.llm -> anthropic",
+    "finsight.indexing.vector_store -> qdrant_client",
+    "finsight.ingestion.xbrl.store -> duckdb",
+]

@@ -1,0 +1,126 @@
+# The company universe FinSight covers.
+#
+# Chosen deliberately, not just "big tech":
+#   * 7 GICS sectors, so retrieval is tested on very different vocabulary.
+#   * Different fiscal year ends (Jan, Jun, Sep, Dec) to exercise fiscal-period alignment.
+#   * Two financials whose statements have no gross profit / COGS, to exercise the XBRL
+#     metric-mapping fallbacks.
+# 12 companies x 5 fiscal years of 10-Ks = 60 filings: large enough to be a real retrieval
+# problem, small enough to index on a laptop in minutes.
+#
+# `known_gaps` maps a canonical metric to the reason it is legitimately absent from that
+# company's XBRL facts. It turns a coverage gap from "unknown" into "explained" (see
+# docs/coverage.md); a declaration whose metric later has data in every year is reported as stale.
+name: core-12
+fiscal_years: [2021, 2022, 2023, 2024, 2025]
+forms: ["10-K"]          # add "10-Q" later to turn on quarterly analysis
+
+companies:
+  - ticker: AAPL
+    name: "Apple Inc."
+    sector: Information Technology
+    fiscal_year_end: "09-30"
+    aliases: [Apple]
+    known_gaps:
+      interest_expense: "Apple stopped disclosing interest expense as a separate item after FY2023."
+
+  - ticker: MSFT
+    name: "Microsoft Corporation"
+    sector: Information Technology
+    fiscal_year_end: "06-30"
+    aliases: [Microsoft]
+    known_gaps:
+      depreciation_amortization: "No single D&A total in SEC companyfacts; only component tags exist."
+
+  - ticker: NVDA
+    name: "NVIDIA Corporation"
+    sector: Information Technology
+    fiscal_year_end: "01-31"
+    aliases: [Nvidia]
+    known_gaps:
+      capex: "The FY2021 value is absent from the SEC companyfacts API (FY2022+ present)."
+
+  - ticker: GOOGL
+    name: "Alphabet Inc."
+    sector: Communication Services
+    fiscal_year_end: "12-31"
+    aliases: [Alphabet, Google]
+    known_gaps:
+      depreciation_amortization: "Depreciation and amortization are separate lines; no single total tag."
+      dividends_paid: "Alphabet paid no dividend before 2024."
+      inventory: "Not tagged separately in every year (immaterial)."
+
+  - ticker: AMZN
+    name: "Amazon.com, Inc."
+    sector: Consumer Discretionary
+    fiscal_year_end: "12-31"
+    aliases: [Amazon, AWS]
+    known_gaps:
+      dividends_paid: "Amazon has never paid a dividend."
+      research_and_development: "Amazon reports 'technology and infrastructure', not R&D."
+      share_repurchases: "No share repurchases in FY2025."
+
+  - ticker: TSLA
+    name: "Tesla, Inc."
+    sector: Consumer Discretionary
+    fiscal_year_end: "12-31"
+    aliases: [Tesla]
+    known_gaps:
+      depreciation_amortization: "No single D&A total in SEC companyfacts; only component tags exist."
+      dividends_paid: "Tesla pays no dividends."
+      share_repurchases: "Tesla has no share repurchase programme."
+
+  - ticker: JPM
+    name: "JPMorgan Chase & Co."
+    sector: Financials
+    fiscal_year_end: "12-31"
+    aliases: [JPMorgan, JP Morgan, Chase]
+    known_gaps:
+      interest_expense: "The total interest expense tag is not used in the FY2024-25 filings."
+      long_term_debt: "Reported under bank-specific tags; no standard long-term-debt total found."
+
+  - ticker: XOM
+    name: "Exxon Mobil Corporation"
+    sector: Energy
+    fiscal_year_end: "12-31"
+    aliases: [Exxon, ExxonMobil]
+    # Pre-2026 registrant. The XOM ticker now maps to ExxonMobil Holdings Corp (new CIK) which has
+    # no 10-K history; all annual reports up to FY2025 are filed under this CIK.
+    cik: "0000034088"
+    known_gaps:
+      cost_of_revenue: "XOM reports several cost lines and no single cost-of-sales total."
+      gross_profit: "Not reported (no single cost-of-sales line to derive it from)."
+      inventory: "Reported in two lines (crude/products and materials/supplies), no total tag."
+      operating_income: "XOM does not report an operating income line."
+
+  - ticker: JNJ
+    name: "Johnson & Johnson"
+    sector: Health Care
+    fiscal_year_end: "12-31"
+    aliases: ["J&J"]
+    known_gaps:
+      operating_income: "J&J does not report an operating income line."
+
+  - ticker: PG
+    name: "The Procter & Gamble Company"
+    sector: Consumer Staples
+    fiscal_year_end: "06-30"
+    aliases: [Procter & Gamble, P&G]
+    known_gaps:
+      pretax_income: "The FY2021 value is absent from the SEC companyfacts API (FY2022+ present)."
+
+  - ticker: WMT
+    name: "Walmart Inc."
+    sector: Consumer Staples
+    fiscal_year_end: "01-31"
+    aliases: [Walmart]
+    known_gaps:
+      research_and_development: "Walmart does not report R&D expense."
+
+  - ticker: KO
+    name: "The Coca-Cola Company"
+    sector: Consumer Staples
+    fiscal_year_end: "12-31"
+    aliases: [Coca-Cola, Coke]
+    known_gaps:
+      research_and_development: "R&D is not tagged in the income statement (not a reported line)."

@@ -1,0 +1,57 @@
+# FinSight: UI -> API -> Qdrant server (+ the local data volume).
+#
+#   docker compose up --build            # start everything
+#   docker compose run --rm api finsight ingest    # download filings + XBRL facts
+#   docker compose run --rm api finsight process   # parse + chunk
+#   docker compose run --rm api finsight index     # embed into the Qdrant server (slow on CPU)
+#
+# Set FINSIGHT_SEC__USER_AGENT and (optionally) ANTHROPIC_API_KEY in .env - see .env.example.
+name: finsight
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "127.0.0.1:6333:6333"
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: api
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      FINSIGHT_QDRANT_URL: http://qdrant:6333
+      FINSIGHT_LOG_JSON: "true"
+      FINSIGHT_ENV: prod
+    volumes:
+      - ./data:/app/data
+      - ./reports:/app/reports
+    depends_on:
+      - qdrant
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: ui
+    restart: unless-stopped
+    environment:
+      FINSIGHT_API_URL: http://api:8000
+    volumes:
+      - ./reports:/app/reports:ro
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:8501:8501"
+
+volumes:
+  qdrant_data:

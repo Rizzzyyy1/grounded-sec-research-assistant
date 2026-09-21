@@ -1,0 +1,52 @@
+# --- python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# --- secrets & local config
+.env
+.env.*
+!.env.example
+
+# --- data: large / regenerable artefacts are never committed
+data/raw/*
+data/interim/*
+data/processed/*
+data/indexes/*
+!data/**/.gitkeep
+# gold evaluation sets ARE tracked (small; gold_v1 is auto-derived, gold_v2_draft is unverified - see docs/EVALUATION.md)
+!data/eval/
+
+# --- evaluation outputs: keep curated summaries, ignore raw per-run dumps
+reports/runs/*
+!reports/runs/.gitkeep
+!reports/figures/
+
+# --- notebooks
+.ipynb_checkpoints/
+
+# --- os / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+
+# --- local vector store / duckdb
+*.duckdb
+*.duckdb.wal
+qdrant_storage/
+
+# run logs
+reports/*.log
