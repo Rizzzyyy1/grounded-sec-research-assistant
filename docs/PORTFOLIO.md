@@ -58,11 +58,15 @@ Pick 3-5 for the role; do not use all of them.
 * Added a second `LLMClient` (ADR-0011) so the tool-using agent could be run live for free against a
   local model (Ollama), no API key: found and fixed two general tool-robustness bugs from real failures,
   set `temperature=0`/`seed=0` after the same question returned a different tool call across runs, and
-  reported the honest paired result against the router (statistically tied) and the extractive baseline
-  (a clear, significant win). [`docs/adr/0011-local-free-llm-provider.md`, `docs/ERROR_ANALYSIS.md` §3c]
+  reported the honest paired result - **not a clean win**: significantly *below* the router on the
+  templated test split (0.735 vs 0.941, driven by ratio/comparison questions), statistically tied on
+  natural phrasing, and a clear win over the extractive baseline on both. Also measured citation hygiene
+  (valid citation, no flagged claim) at 0-8% for the free agent vs 37-100% for the two no-LLM baselines -
+  the accuracy numbers alone overstate how often it actually grounds its answer.
+  [`docs/adr/0011-local-free-llm-provider.md`, `docs/ERROR_ANALYSIS.md` §3c, `reports/RESULTS.md`]
 
 **Software engineering**
-* ~9.4k lines of typed Python (mypy strict, ruff clean) with ~6.5k lines of tests (749 hermetic tests, a
+* ~9.8k lines of typed Python (mypy strict, ruff clean) with ~6.8k lines of tests (778 hermetic tests, a
   Hypothesis property test that found a real chunker bug), CI, Docker files, and import-linter
   architecture contracts each verified to fail on an injected violation. [`make check`, `pyproject.toml`]
 * FastAPI service with SSE streaming, rate limiting and a Streamlit UI; load-tested on one worker: ~80
@@ -76,7 +80,7 @@ Pick 3-5 for the role; do not use all of them.
 |---|---|---|
 | "Claude-powered agent achieves X" | `--llm claude` specifically has never been run (no API key) - there is no Claude accuracy, cost or latency number | "The agent architecture is measured live against a free local model (ADR-0011); Claude itself is unrun" |
 | "The LLM agent beats the router" (bare) | On the natural-phrasing probe the free local agent is statistically indistinguishable from the router (paired diff -0.038, CI crosses zero) - it *does* beat the extractive baseline decisively (+0.385, CI [0.19, 0.58]) | "Indistinguishable from the router, clearly ahead of the extractive baseline - both on a 3B model" |
-| "The agent is grounded / doesn't hallucinate" | The free local model sometimes cites a source that was never retrieved, or paraphrases from training-data familiarity instead of the retrieved passage - caught as warnings, not prevented | "Citation and numeric validators catch it and flag it; they do not yet block it" |
+| "The agent is grounded / doesn't hallucinate" | Only 0-8% of the free local model's answers have a valid citation and no flagged claim (vs the extractive baseline's 96-100%); it sometimes cites a source that was never retrieved, or paraphrases from training-data familiarity instead of the retrieved passage - caught as warnings, not prevented | "Citation and numeric validators catch it and flag it; they do not yet block it, and citation hygiene is currently poor (0-8%) with this free model" |
 | "94% accuracy" (bare) | It is a templated-question result; natural phrasing gave 0.69 | "0.94 on templated held-out questions, 0.69 on natural rewrites" |
 | "Production-ready" / "scales to..." | One process, laptop, no LLM calls in the load test; Docker files never built | "Load-tested on one worker; scaling path documented" |
 | "Retrieval recall of 0.90" | That is dev; the held-out figure is 0.57 (n=15, wide interval) | Quote both, and the reason |
@@ -108,8 +112,11 @@ Pick 3-5 for the role; do not use all of them.
    leave the agent untested - you added a second `LLMClient` behind the existing seam (ADR-0006's
    seam existing was itself a design choice paying off) for a free local model via Ollama, found and
    fixed two real tool-robustness bugs from it (a stringified array argument, a ratio requested
-   through the wrong tool), and reported the honest result: statistically tied with the router, not
-   a win. That is a stronger story than a suspiciously clean number would have been.
+   through the wrong tool), and reported the honest, *mixed* result: significantly below the router
+   on templated questions, tied on natural phrasing, ahead of the extractive baseline on both - and
+   separately, that citation hygiene (0-8%) is far worse than the accuracy numbers alone suggest.
+   That is a stronger story than a suspiciously clean number would have been, and volunteering the
+   citation-hygiene gap without being asked is exactly the kind of thing worth doing out loud.
 
 ---
 

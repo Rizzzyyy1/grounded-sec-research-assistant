@@ -117,7 +117,11 @@ gold data - never added to `data/eval/`). Full trace: `reports/smoke_test_agent_
   revenue?") did not leak the system prompt and correctly answered only the legitimate embedded
   question ($344,582 million, matching `get_financial_metric`) on every run observed.
 * **Citation and grounding weaknesses a 3B model has that Claude is expected not to have (untested
-  claim - no `--llm claude` run exists to compare against).** Observed on repeated runs: (a) a
+  claim - no `--llm claude` run exists to compare against).** Quantified, not just anecdotal: the
+  share of answers with a valid citation and no flagged claim/figure is **4.2% (dev) / 0.0% (test) /
+  7.7% (natural)**, against the router's 36.8-38.6% and the extractive baseline's 96.6-100% (which
+  can only ever quote, so it is close to 100% by construction) - see "Citation hygiene" in
+  [RESULTS](../reports/RESULTS.md). Observed on repeated runs: (a) a
   bogus `[S1]`-style citation appended to a *tool-sourced* number, where the prompt explicitly says
   figures from tools need no bracket - `validate_citations` correctly flags this as "citation to
   unknown source", which is the safety mechanism working, not failing; (b) answering a
@@ -134,14 +138,17 @@ gold data - never added to `data/eval/`). Full trace: `reports/smoke_test_agent_
   different tool call - sometimes a different tool - on consecutive runs at Ollama's default
   sampling. `generation/ollama.py` now sends `temperature=0, seed=0`; confirmed deterministic by
   three repeated single-question runs after the change.
-* **A genuine head-to-head, not a demo number**: on the natural-phrasing probe (`gold_v2_draft`,
-  same file, same moment, current code), the free local agent scores statistically indistinguishably
-  from the deterministic router (paired diff -0.038, CI crosses zero, McNemar p=1.0) and beats the
-  extractive baseline decisively (paired diff +0.385, CI [0.192, 0.577], McNemar p=0.002). By
-  question type the agent wins `fact_lookup` and `out_of_scope` and loses `computed_metric`
-  (the ROE-style tool-confusion above, which persists at `temperature=0` even after the better
-  error message - see the full trace for the exact turn where it gives up instead of retrying).
-  Exact numbers: [RESULTS](../reports/RESULTS.md).
+* **A genuine head-to-head, not a demo number - and it is mixed, not a clean win.** On the
+  **templated `gold_v1` test split**, the agent scores significantly *below* the router (0.735 vs
+  0.941; paired diff -0.206, CI [-0.382, -0.029], excludes zero), driven by `comparison` (0.0 vs
+  1.0) and `computed_metric` (0.125 vs 1.0) - the ROE-style tool-confusion above, which persists at
+  `temperature=0` even after the better error message (see the full trace for the exact turn where
+  it gives up instead of retrying). On the **natural-phrasing probe** (`gold_v2_draft`, same file,
+  same moment, current code) the two are statistically indistinguishable instead (paired diff
+  -0.038, CI crosses zero, McNemar p=1.0). Both comparisons beat the extractive baseline decisively
+  (test: +0.529, CI [0.35, 0.71]; natural: +0.385, CI [0.19, 0.58]). Any summary that reports only
+  one of the two router comparisons is telling half the story. Exact numbers:
+  [RESULTS](../reports/RESULTS.md).
 
 ## 4. Design changes forced by evidence
 

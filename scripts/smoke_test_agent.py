@@ -41,7 +41,7 @@ QUESTIONS: tuple[tuple[str, str], ...] = (
         "What new risks did Nvidia add to its fiscal 2024 risk factors compared with fiscal 2023?",
     ),
     ("insufficient-evidence", "What is Apple's current share price today?"),
-    ("insufficient-evidence", "How many iPhones did Apple sell last quarter?"),
+    ("insufficient-evidence", "How many Tesla vehicles were delivered last month?"),
     (
         "citation-sensitive",
         "What does Amazon say about its approach to sustainability in its fiscal 2024 10-K?",
@@ -56,8 +56,27 @@ QUESTIONS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _assert_disjoint_from_gold(settings: object) -> None:
+    """These 12 questions must never silently duplicate a gold question - a prior version of this
+    file did (found in a documentation-accuracy review), which weakened the "not gold data" claim
+    in this module's own docstring. Fails loudly instead of drifting again."""
+    from finsight.evaluation.datasets import load_gold  # noqa: PLC0415
+
+    asked = {q for _c, q in QUESTIONS}
+    for name in ("gold_v1.jsonl", "gold_v2_draft.jsonl"):
+        path = settings.eval_dir / name  # type: ignore[attr-defined]
+        if not path.is_file():
+            continue
+        overlap = asked & {g.question for g in load_gold(path)}
+        if overlap:
+            raise SystemExit(
+                f"smoke-test question(s) duplicate {name}, pick different ones: {overlap}"
+            )
+
+
 def run(llm_kind: str) -> None:
     settings = get_settings()
+    _assert_disjoint_from_gold(settings)
     llm = make_llm(llm_kind, settings)
     facts = FactStore(settings.fact_db_path)
     rows: list[dict[str, object]] = []

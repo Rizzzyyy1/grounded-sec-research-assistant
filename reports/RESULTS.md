@@ -22,6 +22,16 @@ Accuracy by question type on the **test** split (exploratory: few questions per 
 | out_of_scope | 1.000 | 1.000 |
 | trend | 0.000 | 1.000 |
 
+### Citation hygiene (answers with a valid citation and no flagged claim/figure)
+
+Accuracy alone hides this: a fluent answer can score correct on the numbers it states while citing nothing, or citing a source that does not exist. The router's text fallback and the free local agent both score far below the extractive baseline (which can only ever quote, so it is close to 100% by construction) - this is the more honest read of how "grounded" each system actually is, and it is not visible in the accuracy tables above.
+
+| System | dev | test |
+|---|---|---|
+| Single-shot RAG (extractive) | 96.6% | 100.0% |
+| Tool router | 36.8% | 38.6% |
+| Agent (llama3.2:3b via Ollama, free & local) | 4.2% | 0.0% |
+
 ### Retrieval (section-level; no LLM), default config = hybrid, rerank off
 
 | split | filters | recall@8 [95% CI] | MRR | nDCG@8 |
@@ -32,7 +42,7 @@ Accuracy by question type on the **test** split (exploratory: few questions per 
 
 ### Zero-cost evaluation: the agent against a free, local model (`--llm ollama`, no API key)
 
-Model `llama3.2:3b` via Ollama (ADR-0011), `temperature=0`/`seed=0`, one Apple Silicon laptop, `--workers 1`. This measures *this specific 3B local model*, not an upper bound on the LLM agent - `--llm claude` remains unmeasured (see EVALUATION.md 1.1). Full traces: `reports/runs/*-agent-ollama-*`.
+Model `llama3.2:3b` via Ollama (ADR-0011), `temperature=0`/`seed=0`, one Apple Silicon laptop, `--workers 1`. This measures *this specific 3B local model*, not an upper bound on the LLM agent - `--llm claude` remains unmeasured (see EVALUATION.md 1.1). Full traces: `reports/runs/*-agent-ollama-*`. **Read this alongside citation hygiene above: the accuracy numbers below do not reflect how often the agent actually grounds its answer.**
 
 | System | dev accuracy [95% CI] | test accuracy [95% CI] | abstention F1 (test) | p50 ms | $/query |
 |---|---|---|---|---|---|

@@ -40,6 +40,7 @@ def run_facts(system: str, split: str) -> dict[str, str]:
         "p50": grab(t, r"p50 ([0-9.]+) ms"),
         "cost": grab(t, r"\$([0-9.]+) per query"),
         "n": grab(t, r"questions: (\d+)"),
+        "citation_clean": grab(t, r"citation hygiene[^:]*: ([0-9.]+)%"),
         "run": run.name,
     }
 
@@ -101,6 +102,37 @@ def paired_comparison(run_a: str, run_b: str) -> str | None:
     )
 
 
+def citation_hygiene_section() -> list[str]:
+    """Answers with a valid citation and no flagged claim/figure - the citation-first project's own
+    bar, not just accuracy. Surfaced on its own because it is easy to miss inside a summary.md and
+    tells a different story than accuracy alone (a fluent, uncited answer can still score correct)."""
+    rows = []
+    for name, system in (
+        ("Single-shot RAG (extractive)", "rag"),
+        ("Tool router", "router"),
+        ("Agent (llama3.2:3b via Ollama, free & local)", "agent-ollama"),
+    ):
+        d, t = run_facts(system, "dev"), run_facts(system, "test")
+        if not (d and t):
+            rows.append(f"| {name} | not run | not run |")
+            continue
+        rows.append(f"| {name} | {d['citation_clean']}% | {t['citation_clean']}% |")
+    return [
+        "",
+        "### Citation hygiene (answers with a valid citation and no flagged claim/figure)",
+        "",
+        "Accuracy alone hides this: a fluent answer can score correct on the numbers it states while "
+        "citing nothing, or citing a source that does not exist. The router's text fallback and the "
+        "free local agent both score far below the extractive baseline (which can only ever quote, so "
+        'it is close to 100% by construction) - this is the more honest read of how "grounded" each '
+        "system actually is, and it is not visible in the accuracy tables above.",
+        "",
+        "| System | dev | test |",
+        "|---|---|---|",
+        *rows,
+    ]
+
+
 def ollama_agent_section() -> list[str]:
     """The zero-cost path: the LLM agent run against a free, local model (ADR-0011)."""
     lines = [
@@ -110,7 +142,8 @@ def ollama_agent_section() -> list[str]:
         "Model `llama3.2:3b` via Ollama (ADR-0011), `temperature=0`/`seed=0`, one Apple Silicon "
         "laptop, `--workers 1`. This measures *this specific 3B local model*, not an upper bound on "
         "the LLM agent - `--llm claude` remains unmeasured (see EVALUATION.md 1.1). Full traces: "
-        "`reports/runs/*-agent-ollama-*`.",
+        "`reports/runs/*-agent-ollama-*`. **Read this alongside citation hygiene above: the accuracy "
+        "numbers below do not reflect how often the agent actually grounds its answer.**",
         "",
         "| System | dev accuracy [95% CI] | test accuracy [95% CI] | abstention F1 (test) | p50 ms | $/query |",
         "|---|---|---|---|---|---|",
@@ -227,6 +260,7 @@ def build() -> str:
         f"| {t} | {rag.get(t, '-')} | {router.get(t, '-')} |"
         for t in sorted(set(rag) | set(router))
     ]
+    lines += citation_hygiene_section()
     lines += [
         "",
         "### Retrieval (section-level; no LLM), default config = hybrid, rerank off",
