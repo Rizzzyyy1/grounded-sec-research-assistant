@@ -9,6 +9,7 @@ tables). Nothing here is typed by hand; if an artefact is missing the cell says 
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -54,11 +55,11 @@ def by_type(system: str, split: str) -> dict[str, str]:
     return {m.group(1): m.group(2) for m in rows}
 
 
-def table_row(name: str, system: str) -> str:
+def table_row(name: str, system: str, *, zero_cost_label: str = "$0 (no LLM)") -> str:
     d, t = run_facts(system, "dev"), run_facts(system, "test")
     if not d or not t:
         return f"| {name} | not run | not run | - | - | - |"
-    cost = "$0 (no LLM)" if float(t["cost"]) == 0 else f"${t['cost']}"
+    cost = zero_cost_label if float(t["cost"]) == 0 else f"${t['cost']}"
     return (
         f"| {name} | {d['accuracy']} | {t['accuracy']} | {t['abstain_f1']} | {t['p50']} | {cost} |"
     )
@@ -68,6 +69,104 @@ def metric(md_path: Path, name: str) -> str:
     if not md_path.is_file():
         return "n/a"
     return grab(md_path.read_text(encoding="utf-8"), rf"\| {re.escape(name)} \| ([^|]+) \|").strip()
+
+
+def paired_comparison(run_a: str, run_b: str) -> str | None:
+    """Paired bootstrap + McNemar between two runs on their shared scored questions.
+
+    Mirrors `finsight eval compare` so the numbers in prose match what that command would print.
+    Returns None (never a fabricated "n/a") if either run has not been produced.
+    """
+    a_dir, b_dir = REPORTS / "runs" / run_a, REPORTS / "runs" / run_b
+    if not ((a_dir / "results.jsonl").is_file() and (b_dir / "results.jsonl").is_file()):
+        return None
+    sys.path.insert(0, str(ROOT / "src"))
+    from finsight.evaluation.stats import mcnemar_exact, paired_bootstrap_diff  # noqa: PLC0415
+
+    def load(run: Path) -> dict[str, bool]:
+        rows = [json.loads(line) for line in (run / "results.jsonl").read_text().splitlines()]
+        return {r["id"]: bool(r["correct"]) for r in rows if r["correct"] is not None}
+
+    a, b = load(a_dir), load(b_dir)
+    shared = sorted(set(a) & set(b))
+    va, vb = [float(a[i]) for i in shared], [float(b[i]) for i in shared]
+    diff = paired_bootstrap_diff(va, vb)
+    only_a = sum(1 for x, y in zip(va, vb, strict=True) if x and not y)
+    only_b = sum(1 for x, y in zip(va, vb, strict=True) if y and not x)
+    p = mcnemar_exact(only_a, only_b)
+    sig = " (statistically distinguishable)" if diff.excludes_zero() else " (not distinguishable)"
+    return (
+        f"n={len(shared)} shared questions, accuracy {sum(va) / len(va):.3f} vs "
+        f"{sum(vb) / len(vb):.3f}, paired difference {diff}{sig}, McNemar exact p={p:.4f}"
+    )
+
+
+def ollama_agent_section() -> list[str]:
+    """The zero-cost path: the LLM agent run against a free, local model (ADR-0011)."""
+    lines = [
+        "",
+        "### Zero-cost evaluation: the agent against a free, local model (`--llm ollama`, no API key)",
+        "",
+        "Model `llama3.2:3b` via Ollama (ADR-0011), `temperature=0`/`seed=0`, one Apple Silicon "
+        "laptop, `--workers 1`. This measures *this specific 3B local model*, not an upper bound on "
+        "the LLM agent - `--llm claude` remains unmeasured (see EVALUATION.md 1.1). Full traces: "
+        "`reports/runs/*-agent-ollama-*`.",
+        "",
+        "| System | dev accuracy [95% CI] | test accuracy [95% CI] | abstention F1 (test) | p50 ms | $/query |",
+        "|---|---|---|---|---|---|",
+        table_row(
+            "Agent (llama3.2:3b via Ollama, free & local)",
+            "agent-ollama",
+            zero_cost_label="$0 (free local model)",
+        ),
+        table_row("Tool router (for reference, no LLM)", "router"),
+        table_row("Single-shot RAG (extractive, for reference, no LLM)", "rag"),
+        "",
+    ]
+    ao = by_type("agent-ollama", "test")
+    router = by_type("router", "test")
+    if ao:
+        lines += ["Accuracy by question type on the **test** split, agent-ollama vs router:", ""]
+        lines += ["| Type | Agent (Ollama) | Router |", "|---|---|---|"]
+        lines += [
+            f"| {t} | {ao.get(t, '-')} | {router.get(t, '-')} |" for t in sorted(set(ao) | set(router))
+        ]  # fmt: skip
+        lines.append("")
+
+    test_a = latest_run("agent-ollama", "test")
+    test_stats = []
+    if test_a:
+        for label, b_system, b_split in (
+            ("agent-ollama vs router", "router", "test"),
+            ("agent-ollama vs single-shot RAG (extractive)", "rag", "test"),
+        ):
+            run_b = latest_run(b_system, b_split)
+            result = paired_comparison(test_a.name, run_b.name) if run_b else None
+            if result:
+                test_stats.append(f"* **{label}** (`gold_v1` templated test split): {result}")
+    if test_stats:
+        lines += ["On the templated `gold_v1` test split:", "", *test_stats, ""]
+
+    run_a = latest_run("agent-ollama", "natural")
+    stats_lines = []
+    if run_a:
+        for label, b_system, b_split in (
+            ("agent-ollama vs router", "router", "natural-refresh"),
+            ("agent-ollama vs single-shot RAG (extractive)", "rag-extractive", "natural-refresh"),
+        ):
+            run_b = latest_run(b_system, b_split)
+            result = paired_comparison(run_a.name, run_b.name) if run_b else None
+            if result:
+                stats_lines.append(f"* **{label}** (natural phrasing, `gold_v2_draft`): {result}")
+    if stats_lines:
+        lines += [
+            "On the 38-question natural-phrasing probe (same file and current code as the router/RAG "
+            "baselines above, so this is a same-moment, apples-to-apples comparison):",
+            "",
+            *stats_lines,
+            "",
+        ]
+    return lines
 
 
 def natural_section() -> list[str]:
@@ -117,6 +216,7 @@ def build() -> str:
         table_row("Single-shot RAG (extractive quoting, no LLM)", "rag"),
         table_row("Tool router (XBRL tools + extractive fallback, no LLM)", "router"),
         "| Claude agent (tools + LLM) | not run: no API key | not run | - | - | - |",
+        "| Agent (llama3.2:3b via Ollama, free & local - see below) | see below | see below | - | - | $0 |",
         "",
         "Accuracy by question type on the **test** split (exploratory: few questions per type):",
         "",
@@ -142,6 +242,7 @@ def build() -> str:
         lines.append(
             f"| {label} | {flt} | {metric(path, 'recall@8')} | {metric(path, 'mrr')} | {metric(path, 'ndcg@8')} |"
         )
+    lines += ollama_agent_section()
     lines += natural_section()
     for title, name in (
         ("Ablation A1: retrieval mode (dev split)", "ablation_A1_dev.md"),

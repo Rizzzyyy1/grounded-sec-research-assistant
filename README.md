@@ -10,8 +10,10 @@ reports confidence intervals and admits where the system is weak.
 ![lint](https://img.shields.io/badge/ruff-clean-success)
 
 > **Status:** all eight phases are built and tested against real SEC data (12 companies,
-> 60 10-Ks, 23,221 chunks, 9,146 XBRL facts). The **Claude-powered agent is implemented and unit-tested
-> against a scripted model but has not been run live** (no API key was available) — see
+> 60 10-Ks, 23,221 chunks, 9,146 XBRL facts). The same `ResearchAgent` tool loop that would run
+> Claude has been **run live for the first time against a free, local model** (`--llm ollama`,
+> `llama3.2:3b`, ADR-0011) — no API key needed, `finsight doctor` checks it. **`--llm claude`
+> itself remains unrun** (no API key available); the two must not be conflated — see
 > [what is and isn't measured](#what-is-and-isnt-measured).
 
 ---
@@ -44,6 +46,7 @@ are correct by construction; it is *not* human-verified) — [read the caveats](
 | Single-shot RAG (extractive quoting, no LLM) | 0.275 [0.174, 0.377] | 0.206 [0.088, 0.353] | 0.83 | 613 | $0 (no LLM) |
 | Tool router (XBRL tools + extractive fallback, no LLM) | 0.942 [0.884, 0.986] | 0.941 [0.853, 1.000] | 0.83 | 86 | $0 (no LLM) |
 | Claude agent (tools + LLM) | not run: no API key | not run | - | - | - |
+| Agent (llama3.2:3b via Ollama, free & local - see below) | see below | see below | - | - | $0 |
 
 Accuracy by question type on the **test** split (exploratory: few questions per type):
 
@@ -63,6 +66,38 @@ Accuracy by question type on the **test** split (exploratory: few questions per 
 | dev (n=29) | on | 0.897 [0.793, 1.000] | 0.614 [0.469, 0.755] | 0.346 [0.257, 0.442] |
 | **test (n=15)** | on | 0.567 [0.333, 0.800] | 0.445 [0.219, 0.686] | 0.267 [0.121, 0.421] |
 | test (n=15) | off | 0.367 [0.133, 0.600] | 0.198 [0.042, 0.386] | 0.083 [0.022, 0.158] |
+
+### Zero-cost evaluation: the agent against a free, local model (`--llm ollama`, no API key)
+
+Model `llama3.2:3b` via Ollama (ADR-0011), `temperature=0`/`seed=0`, one Apple Silicon laptop, `--workers 1`. This measures *this specific 3B local model*, not an upper bound on the LLM agent - `--llm claude` remains unmeasured (see EVALUATION.md 1.1). Full traces: `reports/runs/*-agent-ollama-*`.
+
+| System | dev accuracy [95% CI] | test accuracy [95% CI] | abstention F1 (test) | p50 ms | $/query |
+|---|---|---|---|---|---|
+| Agent (llama3.2:3b via Ollama, free & local) | 0.768 [0.667, 0.870] | 0.735 [0.588, 0.882] | 0.82 | 10217 | $0 (free local model) |
+| Tool router (for reference, no LLM) | 0.942 [0.884, 0.986] | 0.941 [0.853, 1.000] | 0.83 | 86 | $0 (no LLM) |
+| Single-shot RAG (extractive, for reference, no LLM) | 0.275 [0.174, 0.377] | 0.206 [0.088, 0.353] | 0.83 | 613 | $0 (no LLM) |
+
+Accuracy by question type on the **test** split, agent-ollama vs router:
+
+| Type | Agent (Ollama) | Router |
+|---|---|---|
+| comparison | 0.000 | 1.000 |
+| computed_metric | 0.125 | 1.000 |
+| fact_lookup | 1.000 | 0.000 |
+| numeric | 1.000 | 1.000 |
+| out_of_scope | 1.000 | 1.000 |
+| trend | 1.000 | 1.000 |
+
+On the templated `gold_v1` test split:
+
+* **agent-ollama vs router** (`gold_v1` templated test split): n=34 shared questions, accuracy 0.735 vs 0.941, paired difference -0.206 [-0.382, -0.029] (statistically distinguishable), McNemar exact p=0.0654
+* **agent-ollama vs single-shot RAG (extractive)** (`gold_v1` templated test split): n=34 shared questions, accuracy 0.735 vs 0.206, paired difference 0.529 [0.353, 0.706] (statistically distinguishable), McNemar exact p=0.0000
+
+On the 38-question natural-phrasing probe (same file and current code as the router/RAG baselines above, so this is a same-moment, apples-to-apples comparison):
+
+* **agent-ollama vs router** (natural phrasing, `gold_v2_draft`): n=26 shared questions, accuracy 0.808 vs 0.846, paired difference -0.038 [-0.192, 0.115] (not distinguishable), McNemar exact p=1.0000
+* **agent-ollama vs single-shot RAG (extractive)** (natural phrasing, `gold_v2_draft`): n=26 shared questions, accuracy 0.808 vs 0.423, paired difference 0.385 [0.192, 0.577] (statistically distinguishable), McNemar exact p=0.0020
+
 
 ### Templated vs natural phrasing (`gold_v2_draft`, 38 questions, unverified draft labels)
 
@@ -246,8 +281,18 @@ python scripts/collect_results.py --readme                                  # re
 finsight serve &  finsight ui          # API on :8000, Streamlit on :8501
 ```
 
-With an Anthropic key (`ANTHROPIC_API_KEY` or `ant auth login`) the same commands run the Claude agent:
-`finsight ask "..."`, `finsight eval run --system agent --llm claude`.
+**Try the actual LLM agent for free**, no API key (ADR-0011):
+
+```bash
+brew install ollama && brew services start ollama && ollama pull llama3.2:3b   # ~2 GB, one time
+finsight doctor                                                                 # confirms it's reachable
+finsight ask "What was Apple's revenue in fiscal 2024?" --llm ollama --system agent
+finsight eval run --system agent --llm ollama --split test --workers 1 --name agent-ollama-test
+```
+
+With an Anthropic key (`ANTHROPIC_API_KEY` or `ant auth login`) the same commands run Claude instead:
+`finsight ask "..." --llm claude --system agent`, `finsight eval run --system agent --llm claude`.
+This has not been done on the machine this was built on - see [what is and isn't measured](#what-is-and-isnt-measured).
 
 **Docker** (API + UI + Qdrant server): `docker compose up --build` — see [docker-compose.yml](docker-compose.yml).
 Not run on the machine this was built on (no Docker); the files are validated statically in the test suite.
@@ -270,12 +315,16 @@ Not run on the machine this was built on (no Docker); the files are validated st
 
 ## What is and isn't measured
 
-| Measured with real data | Implemented and unit-tested, **not** run live |
-|---|---|
-| XBRL parsing vs 14 published figures; 0 unexplained gaps; identity holds in 278 periods | Claude agent (`ResearchAgent`), LLM judge, refusal-fallback request shape |
-| Section detection: 60/60 filings yield all core Items | Docker images / compose stack |
-| Retrieval ablations, header ablation, metadata-filter effect | Streaming beyond replayed trace events |
-| Tool router vs RAG, paired, on held-out companies | Human-verified gold set (`gold_v2`) |
+| Measured with real data | Measured live, **free local model only** (`--llm ollama`) | Implemented and unit-tested, **not** run live |
+|---|---|---|
+| XBRL parsing vs 14 published figures; 0 unexplained gaps; identity holds in 278 periods | `ResearchAgent` tool loop: dev + test + the natural-phrasing probe, all vs the router (ERROR_ANALYSIS 3c) | `--llm claude` specifically; LLM judge; refusal-fallback request shape |
+| Section detection: 60/60 filings yield all core Items | 12-question manual smoke test across 5 categories (`scripts/smoke_test_agent.py`) | Docker images / compose stack |
+| Retrieval ablations, header ablation, metadata-filter effect |  | Streaming beyond replayed trace events |
+| Tool router vs RAG, paired, on held-out companies |  | Human-verified gold set (`gold_v2`) |
+
+A free local model is not Claude - `llama3.2:3b` is roughly 1/50th the parameter count. Results in
+the middle column are evidence about the *architecture* (does the tool loop work end to end, does
+it ground and cite, does it abstain), not a preview of `--llm claude`'s quality or cost.
 
 ## Repository tour
 
