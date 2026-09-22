@@ -15,7 +15,12 @@ What is and is not verified (recorded as ``provenance="draft"``):
   **not** human-verified. Where several sections could legitimately answer, all are listed; read
   those scores with hit@8 (any section) not recall (all sections).
 
-Everything is placed in the `test` split and was never used to tune anything.
+Everything is placed in the `test` split. It was *not* used to tune retrieval or the routing
+rules - but the advice guardrail *was* broadened in direct response to failures on this file (see
+docs/ERROR_ANALYSIS.md 3b): read any post-fix number computed against this file as in-sample for
+that guardrail, never as a clean measurement of it. Regenerating this file after such a fix (e.g.
+to add new adversarial phrasings) would make that contamination worse, not better - extend it only
+with questions that do not target the specific gap just fixed, or build a fresh file instead.
 """
 
 from __future__ import annotations

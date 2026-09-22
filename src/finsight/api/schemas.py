@@ -31,8 +31,10 @@ class QueryRequest(BaseModel):
     )
     mode: Mode = Field(
         default="auto",
-        description="auto = Claude agent when credentials exist, otherwise the deterministic tool router; "
-        "router = XBRL tools, no LLM; rag = single-shot retrieval; agent = Claude with tools.",
+        description="auto = the tool-using agent when an LLM is configured (see /readyz "
+        "llm_provider - Claude or, free and local, Ollama), otherwise the deterministic tool "
+        "router; router = XBRL tools, no LLM; rag = single-shot retrieval; agent = tools + "
+        "whichever LLM `finsight serve` was started with.",
     )
 
 

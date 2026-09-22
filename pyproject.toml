@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "finsight"
 version = "0.1.0"
-description = "Grounded, citation-first financial research assistant: hybrid RAG over SEC filings + deterministic XBRL analytics + a tool-using Claude agent, with a first-class evaluation harness."
+description = "Grounded, citation-first financial research assistant: hybrid RAG over SEC filings + deterministic XBRL analytics + a tool-using agent (Claude, or a free local model via Ollama), with a first-class evaluation harness."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

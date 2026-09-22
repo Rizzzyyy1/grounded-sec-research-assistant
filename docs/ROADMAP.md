@@ -164,7 +164,11 @@ all headline numbers reproducible via one documented command.
 
 1. **Run `--llm claude`** on the gold set (`finsight eval run --system agent --llm claude`) and record the
    result *alongside* the free `--llm ollama` numbers already measured (ADR-0011) - do not replace them.
-2. **`gold_v2`**: human-verified, naturally phrased, multi-source labels, fresh holdout.
+2. **`gold_v2`**: human-verified, naturally phrased, multi-source labels, fresh holdout. The naturally
+   phrased draft already exists (`data/eval/gold_v2_draft.jsonl`, 38 questions, `provenance=draft`);
+   what remains is the human verification pass — procedure and worksheet:
+   [GOLD_V2_REVIEW_CHECKLIST.md](GOLD_V2_REVIEW_CHECKLIST.md) / `reports/gold_v2_review_worksheet.md`
+   — prepared, not completed; no label has been approved.
 3. Section-mapping override for filings like JPMorgan's; retrieval-score relevance floor for abstention.
 4. Union the old and new XOM CIKs once FY2026 10-Ks exist.
 5. ~~Wire a provider choice through `finsight serve`/`finsight ui`~~ **Done**: `finsight serve --llm

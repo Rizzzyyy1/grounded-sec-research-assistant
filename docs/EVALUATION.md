@@ -121,6 +121,10 @@ phrasing, and the advice guardrail had a hole (all 4 naturally phrased advice re
 templated questions could not reveal. The post-fix re-run is **in-sample** because the fix was written
 from these questions; only the pre-fix column is a clean measurement.
 
+Turning this into `gold_v2` needs a human to verify every label - see
+[GOLD_V2_REVIEW_CHECKLIST.md](GOLD_V2_REVIEW_CHECKLIST.md) for the exact procedure and
+`reports/gold_v2_review_worksheet.md` for the row-by-row worksheet. Not done as of this writing.
+
 ## 3. Metrics
 
 ### 3.1 Retrieval (no LLM; runs in CI on a fixture corpus)

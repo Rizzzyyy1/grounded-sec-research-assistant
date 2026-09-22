@@ -171,7 +171,7 @@ Nothing here can be done without your accounts, machine or judgement:
    between a 3B free model and Claude is itself a finding. Until then those cells say "not run" — leave
    them that way.
 2. **Push to GitHub** and confirm CI is green; replace the `your-username` placeholders.
-3. **Human-verify `gold_v2`** (`data/eval/gold_v2_draft.jsonl`): this is what turns the probes into a clean holdout.
+3. **Human-verify `gold_v2`** (`data/eval/gold_v2_draft.jsonl`): this is what turns the probes into a clean holdout. Procedure and worksheet: `docs/GOLD_V2_REVIEW_CHECKLIST.md` / `reports/gold_v2_review_worksheet.md` - prepared, not completed; no label has been approved.
 4. **Build the Docker image** (`docker compose up`) on a machine with Docker; fix whatever breaks.
 5. **Record a 60-second demo** (screen capture of `finsight ui`).
 6. ~~Wire a provider choice through the API/UI~~ **Done** (ADR-0012): `finsight serve --llm ollama`

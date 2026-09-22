@@ -1,8 +1,9 @@
 # FinSight
 
 **A grounded, citation-first financial research assistant** — hybrid RAG over SEC filings,
-deterministic XBRL analytics, and a tool-using Claude agent, with an evaluation harness that
-reports confidence intervals and admits where the system is weak.
+deterministic XBRL analytics, and a tool-using agent (Claude, or a free local model via Ollama —
+ADR-0011), with an evaluation harness that reports confidence intervals and admits where the
+system is weak.
 
 [![CI](https://github.com/your-username/finsight/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/finsight/actions)
 ![python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue)
@@ -258,7 +259,7 @@ flowchart LR
     q([Question]) --> g[Guardrails] --> a[Query analysis<br/>tickers · years · type]
     a --> r[Hybrid retriever<br/>dense ‖ BM25 → RRF]
     a --> t[Tools<br/>XBRL facts · ratios · peers]
-    r --> l[Claude / router]
+    r --> l[Agent: Claude or Ollama / router]
     t --> l
     l --> v[Validators<br/>citations · figures]
     v --> ans([Answer<br/>text + citations + trace + cost])
@@ -354,7 +355,7 @@ src/finsight/
   processing/     iXBRL cleaning · Item splitting · tables · section-aware chunking · contextual headers
   indexing/       embeddings · Qdrant · BM25 · resumable builder + manifest
   retrieval/      query analysis · dense · sparse · RRF · rerank · Retriever facade
-  generation/     Claude wrapper · prompts · context · citations · figure verification · RAG pipeline
+  generation/     Claude + Ollama wrappers · prompts · context · citations · figure verification · RAG pipeline
   analytics/      ratios · DuPont + attribution · trends · peers · risk-factor diff · tone
   agent/          tools · deterministic router · LLM research agent
   evaluation/     gold builder · metrics · runners · ablation · bootstrap stats · judges · reports

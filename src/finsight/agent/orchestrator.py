@@ -1,6 +1,8 @@
-"""LLM research agent: a bounded tool-use loop over Claude.
+"""LLM research agent: a bounded tool-use loop over any :class:`LLMClient` (Claude or, free and
+local, Ollama - ADR-0011; never both in the same run, see ``api/main.py::_resolve_llm``).
 
-Loop (the standard Messages-API pattern): send the question and tool definitions; if the model
+Loop (the standard Messages-API pattern, which ``generation/ollama.py`` also speaks - see its
+module docstring): send the question and tool definitions; if the model
 asks for tools, run them (in parallel when independent), return *all* results in one user turn,
 and repeat until it answers or the step budget runs out. Then validate the answer exactly like the
 baseline does: citations must resolve to passages the tools surfaced, and every figure must appear

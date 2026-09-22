@@ -535,7 +535,7 @@ def eval_ablate(
 @eval_app.command("run")
 def eval_run(
     system: Annotated[
-        str, typer.Option(help="rag, router (XBRL tools, no LLM) or agent (Claude).")
+        str, typer.Option(help="rag, router (XBRL tools, no LLM) or agent (LLM chosen by --llm).")
     ] = "rag",
     llm: Annotated[
         str,
