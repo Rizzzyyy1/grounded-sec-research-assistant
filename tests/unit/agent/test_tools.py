@@ -39,6 +39,24 @@ def test_metric_series_and_default_all_years(ctx: AgentContext) -> None:
     assert [v["fiscal_year"] for v in payload["values"]] == [2022, 2023, 2024]
 
 
+def test_stringified_array_arguments_are_accepted_not_rejected(ctx: AgentContext) -> None:
+    """Small/local models (observed with Ollama tool calling) sometimes send an array argument
+    as a JSON-encoded string, e.g. ``"[2024]"`` instead of ``[2024]``. Claude does not do this,
+    but a malformed-yet-recoverable argument should degrade to a correct answer, not a ToolError.
+    """
+    payload = call(
+        ctx, "get_financial_metric", ticker="AAPL", metric="revenue", fiscal_years="[2024]"
+    )
+    assert [v["fiscal_year"] for v in payload["values"]] == [2024]
+
+
+def test_bare_string_where_a_list_of_one_ticker_was_meant_is_accepted(
+    ctx: AgentContext,
+) -> None:
+    payload = call(ctx, "search_filings", query="risk factors", tickers="AAPL")
+    assert all(p["filing"].startswith("AAPL") for p in payload["passages"])
+
+
 def test_ratio_tool_shows_formula_and_inputs(ctx: AgentContext) -> None:
     p = call(ctx, "compute_ratio", ticker="AAPL", ratio="gross_margin", fiscal_year=2024)
     assert p["value"] == pytest.approx(180_683 / 391_035) and p["formatted"] == "46.2%"
@@ -88,6 +106,11 @@ def test_compare_companies_ranks_best_first_and_skips_with_reasons(ctx: AgentCon
     [
         ("get_financial_metric", {"ticker": "ZZZ", "metric": "revenue"}, "unknown company"),
         ("get_financial_metric", {"ticker": "AAPL", "metric": "vibes"}, "unknown metric"),
+        (
+            "get_financial_metric",
+            {"ticker": "AAPL", "metric": "roe"},
+            "is a ratio, not a reported metric; use compute_ratio",
+        ),
         (
             "get_financial_metric",
             {"ticker": "AAPL", "metric": "revenue", "fiscal_years": [1999]},

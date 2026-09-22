@@ -89,6 +89,10 @@ def _ticker(ctx: AgentContext, raw: str) -> str:
 
 def _metric(name: str) -> str:
     if name not in CANONICAL_METRICS:
+        # A model reaching for get_financial_metric with a ratio name (e.g. "roe") is a common,
+        # recoverable mistake - name the right tool instead of just listing what this one accepts.
+        if name in RATIOS:
+            raise ToolError(f"{name!r} is a ratio, not a reported metric; use compute_ratio")
         raise ToolError(
             f"unknown metric {name!r}; available: {', '.join(sorted(CANONICAL_METRICS))}"
         )
@@ -125,11 +129,33 @@ def _dump(payload: Mapping[str, Any]) -> str:
     return json.dumps(payload, indent=2, default=str)
 
 
+def _as_list(value: Any) -> list[Any]:
+    """Coerce an array-typed tool argument that arrived in the wrong shape.
+
+    Anthropic's tool use reliably matches the declared JSON Schema, but smaller/local models
+    (observed with Ollama function calling) sometimes stringify an array argument - e.g.
+    ``fiscal_years: "[2024]"`` instead of ``[2024]`` - or send a single bare value instead of a
+    one-item list. Accepting the reasonable shapes here means one weird argument degrades that one
+    tool call, not a hard ``ToolError`` that ends the agent's turn.
+    """
+    if value is None:
+        return []
+    if isinstance(value, list | tuple):
+        return list(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return [value]
+        return parsed if isinstance(parsed, list) else [parsed]
+    return [value]
+
+
 # --------------------------------------------------------------------------- handlers
 def get_financial_metric(ctx: AgentContext, args: Mapping[str, Any]) -> ToolOutput:
     ticker, metric = _ticker(ctx, str(args["ticker"])), _metric(str(args["metric"]))
     period = FiscalPeriod(str(args.get("period", "FY")))
-    years = [int(y) for y in args.get("fiscal_years") or []]
+    years = [int(y) for y in _as_list(args.get("fiscal_years"))]
     # ALL store access happens inside one critical section: a DuckDB connection must not be used
     # by two threads at once, and parallel tool calls do exactly that if the lock is released
     # between the two queries.
@@ -197,7 +223,7 @@ def _value_for(ctx: AgentContext, ticker: str, name: str, year: int) -> tuple[fl
 
 
 def compare_companies(ctx: AgentContext, args: Mapping[str, Any]) -> ToolOutput:
-    tickers = [_ticker(ctx, str(t)) for t in args["tickers"]]
+    tickers = [_ticker(ctx, str(t)) for t in _as_list(args["tickers"])]
     if len(tickers) < 2:
         raise ToolError("compare_companies needs at least two tickers")
     name, year = str(args["metric"]), int(args["fiscal_year"])
@@ -224,11 +250,11 @@ def compare_companies(ctx: AgentContext, args: Mapping[str, Any]) -> ToolOutput:
 
 def search_filings(ctx: AgentContext, args: Mapping[str, Any]) -> ToolOutput:
     query = str(args["query"])
-    tickers = tuple(_ticker(ctx, str(t)) for t in args.get("tickers") or [])
+    tickers = tuple(_ticker(ctx, str(t)) for t in _as_list(args.get("tickers")))
     filters = RetrievalFilters(
         tickers=tickers,
-        fiscal_years=tuple(int(y) for y in args.get("fiscal_years") or []),
-        items=tuple(str(i) for i in args.get("items") or []),
+        fiscal_years=tuple(int(y) for y in _as_list(args.get("fiscal_years"))),
+        items=tuple(str(i) for i in _as_list(args.get("items"))),
     )
     with ctx.search_lock:
         result = ctx.retriever.retrieve(
