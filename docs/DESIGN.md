@@ -251,7 +251,7 @@ and property-tested (e.g. DuPont factors must multiply back to ROE).
 |---|---|---|
 | Language / tooling | Python ≥ 3.11, Ruff, mypy `--strict`, pytest | Ecosystem fit; strict typing catches schema drift early |
 | Domain models | Pydantic v2 (frozen, `extra=forbid`) | Validation at boundaries; same models for API, config and eval |
-| LLM | Anthropic Claude via official SDK; default `claude-opus-5` | Strong tool use, long context; provider behind a thin wrapper (ADR-0006) |
+| LLM | Anthropic Claude via official SDK; default `claude-opus-5`. A second `LLMClient`, Ollama (free, local, no API key), runs the same agent for $0 (`--llm ollama`) | Strong tool use, long context; provider behind a thin wrapper (ADR-0006, extended by ADR-0011) |
 | Embeddings / rerank | FastEmbed (ONNX): `bge-small-en-v1.5`, MiniLM cross-encoder | No PyTorch; runs on a laptop CPU; swappable (ADR-0005) |
 | Vector store | Qdrant (embedded now, server in compose) | Payload pre-filtering; same API local and prod (ADR-0004) |
 | Lexical index | `bm25s` | Fast, dependency-light BM25 with persistence |

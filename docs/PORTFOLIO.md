@@ -55,6 +55,11 @@ Pick 3-5 for the role; do not use all of them.
 * Stress-tested my own result with a natural-phrasing probe: the tool router fell to **0.69** on 38
   differently worded questions and exposed a hole in the advice guardrail (all 4 naturally phrased advice
   requests slipped through); fixed it and reported the re-run as in-sample. [`reports/RESULTS.md`, `docs/ERROR_ANALYSIS.md` §3b]
+* Added a second `LLMClient` (ADR-0011) so the tool-using agent could be run live for free against a
+  local model (Ollama), no API key: found and fixed two general tool-robustness bugs from real failures,
+  set `temperature=0`/`seed=0` after the same question returned a different tool call across runs, and
+  reported the honest paired result against the router (statistically tied) and the extractive baseline
+  (a clear, significant win). [`docs/adr/0011-local-free-llm-provider.md`, `docs/ERROR_ANALYSIS.md` §3c]
 
 **Software engineering**
 * ~9.4k lines of typed Python (mypy strict, ruff clean) with ~6.5k lines of tests (749 hermetic tests, a
@@ -69,7 +74,9 @@ Pick 3-5 for the role; do not use all of them.
 
 | Do not say | Why | Say instead |
 |---|---|---|
-| "Claude-powered agent achieves X" | The LLM agent is implemented and unit-tested against a scripted model but **has never been run live** (no API key). There is no LLM accuracy, cost or latency number | "The agent is implemented and tested; the measured tools-vs-text comparison uses a deterministic router" |
+| "Claude-powered agent achieves X" | `--llm claude` specifically has never been run (no API key) - there is no Claude accuracy, cost or latency number | "The agent architecture is measured live against a free local model (ADR-0011); Claude itself is unrun" |
+| "The LLM agent beats the router" (bare) | On the natural-phrasing probe the free local agent is statistically indistinguishable from the router (paired diff -0.038, CI crosses zero) - it *does* beat the extractive baseline decisively (+0.385, CI [0.19, 0.58]) | "Indistinguishable from the router, clearly ahead of the extractive baseline - both on a 3B model" |
+| "The agent is grounded / doesn't hallucinate" | The free local model sometimes cites a source that was never retrieved, or paraphrases from training-data familiarity instead of the retrieved passage - caught as warnings, not prevented | "Citation and numeric validators catch it and flag it; they do not yet block it" |
 | "94% accuracy" (bare) | It is a templated-question result; natural phrasing gave 0.69 | "0.94 on templated held-out questions, 0.69 on natural rewrites" |
 | "Production-ready" / "scales to..." | One process, laptop, no LLM calls in the load test; Docker files never built | "Load-tested on one worker; scaling path documented" |
 | "Retrieval recall of 0.90" | That is dev; the held-out figure is 0.57 (n=15, wide interval) | Quote both, and the reason |
@@ -97,6 +104,12 @@ Pick 3-5 for the role; do not use all of them.
 7. **Reranker rejected on evidence.** Better nDCG, no recall gain, 16× latency → opt-in default.
 8. **Load test finding.** Throughput peaks at concurrency 4 then *falls*; say it is a hypothesis
    (serialised DuckDB critical section + one process) that you did not profile.
+9. **Getting the agent running with zero budget.** When a paid API key wasn't available, you didn't
+   leave the agent untested - you added a second `LLMClient` behind the existing seam (ADR-0006's
+   seam existing was itself a design choice paying off) for a free local model via Ollama, found and
+   fixed two real tool-robustness bugs from it (a stringified array argument, a ratio requested
+   through the wrong tool), and reported the honest result: statistically tied with the router, not
+   a win. That is a stronger story than a suspiciously clean number would have been.
 
 ---
 
@@ -143,8 +156,15 @@ under five minutes:
 
 Nothing here can be done without your accounts, machine or judgement:
 
-1. **Run the Claude agent** once with an API key (`ANTHROPIC_API_KEY`), then re-run the evaluation and add the numbers. Until then the README says "not run" — leave it that way.
+1. **Run `--llm claude` once with an API key** (`ANTHROPIC_API_KEY`), then re-run the same evaluations
+   already run for free (`finsight eval run --system agent --llm claude ...`) and add the numbers
+   alongside the free-local-model ones already in the README - do not replace them, the comparison
+   between a 3B free model and Claude is itself a finding. Until then those cells say "not run" — leave
+   them that way.
 2. **Push to GitHub** and confirm CI is green; replace the `your-username` placeholders.
 3. **Human-verify `gold_v2`** (`data/eval/gold_v2_draft.jsonl`): this is what turns the probes into a clean holdout.
 4. **Build the Docker image** (`docker compose up`) on a machine with Docker; fix whatever breaks.
 5. **Record a 60-second demo** (screen capture of `finsight ui`).
+6. **Wire a provider choice through the API/UI** (`api/deps.py` currently gates agent mode on
+   `ANTHROPIC_API_KEY` only, so `finsight serve`/`finsight ui` cannot yet serve `--llm ollama` - the
+   CLI can). A reasonable, well-scoped next change, deliberately left undone this round.

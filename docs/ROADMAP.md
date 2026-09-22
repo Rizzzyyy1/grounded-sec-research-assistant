@@ -24,14 +24,14 @@ changed, and why:
 | Plan | What happened |
 |---|---|
 | Gold set: ~120 human-verified, LLM-assisted questions | **147 automatically derived questions** (numeric answers correct by construction). Human verification and LLM-assisted phrasing remain `gold_v2` work — documented in [EVALUATION §2.1](EVALUATION.md#21-what-gold_v1-actually-is) |
-| Agent evaluated against the RAG baseline | The **LLM agent is implemented and unit-tested but was not run live** (no API key). A deterministic tool router (ADR-0009) provides the measured tools-vs-text comparison |
+| Agent evaluated against the RAG baseline | **Run live** (ADR-0011) against a free local model (`--llm ollama`, no API key): dev, test and the natural-phrasing probe, paired against the router and the extractive baseline (ERROR_ANALYSIS 3c). `--llm claude` specifically remains unrun (no API key) |
 | `get_price_history` tool | **Not implemented**: a live market-data dependency that cannot be verified offline, and the assistant gives no price views |
 | Reranker as the default | **Reranker is opt-in** after ablation A1 (ADR-0002 amendment) |
 | `finsight data coverage` | Shipped as `finsight coverage`; plus `known_gaps`, raw-availability and identity-coverage reporting |
 | Load test, import-linter | **Done**: [`reports/load_test.md`](../reports/load_test.md) (one worker, no LLM) and six import-linter contracts run by `make arch` and CI, each shown to fail on an injected violation. The first draft found a real `indexing` <-> `retrieval` cycle (`RetrievalFilters` moved to `core`) |
 | Ablations | A1, A2/A3 (BM25 half), A4 (BM25 half), A7 run; A5, A6-beyond-MiniLM, A8-with-LLM, A9 not run (need downloads or an API key) |
 | Docker | Files written and statically tested; **not built or run** (no Docker on the build machine) |
-| 10-Q / 8-K, FY2026 successor-CIK union, human gold set, running the agent live | Future work (below) |
+| 10-Q / 8-K, FY2026 successor-CIK union, human gold set, running Claude specifically | Future work (below) |
 
 ---
 
@@ -162,11 +162,13 @@ all headline numbers reproducible via one documented command.
 
 ## Next steps (highest value first)
 
-1. **Run the Claude agent** on the gold set (`finsight eval run --system agent --llm claude`) and record the
-   abstention and paraphrase behaviour the baselines cannot show.
+1. **Run `--llm claude`** on the gold set (`finsight eval run --system agent --llm claude`) and record the
+   result *alongside* the free `--llm ollama` numbers already measured (ADR-0011) - do not replace them.
 2. **`gold_v2`**: human-verified, naturally phrased, multi-source labels, fresh holdout.
 3. Section-mapping override for filings like JPMorgan's; retrieval-score relevance floor for abstention.
 4. Union the old and new XOM CIKs once FY2026 10-Ks exist.
+5. Wire a provider choice through `finsight serve`/`finsight ui` (`api/deps.py` currently gates agent
+   mode on `ANTHROPIC_API_KEY` only; the CLI already supports `--llm ollama`).
 
 ## Stretch ideas
 

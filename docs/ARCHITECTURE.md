@@ -93,7 +93,8 @@ src/finsight/
 ├── processing/    html_parser · sections · tables · chunking · enrichment
 ├── indexing/      embeddings · vector_store · sparse_index · builder
 ├── retrieval/     query_analysis · dense · sparse · hybrid · rerank · retriever
-├── generation/    llm · prompts · context · citations · guardrails · pipeline
+├── generation/    llm (Claude) · ollama (free, local) · offline (extractive) · prompts · context ·
+│                  citations · guardrails · pipeline
 ├── analytics/     ratios · dupont · trends · peers · risk_diff · sentiment   ← pure functions
 ├── agent/         tools · orchestrator · trace
 ├── evaluation/    datasets · metrics/ · judges · runner · ablation · stats · report

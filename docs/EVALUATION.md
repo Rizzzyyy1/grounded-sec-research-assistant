@@ -16,7 +16,39 @@ Two systems share one interface (`question → Answer`) and are scored by the sa
 * **Agent** — tool-using research agent (`agent/orchestrator.py`, Phase 6)
 
 Components inside them (retriever, chunker, embedder, reranker) are additionally evaluated in
-isolation with **retrieval-only** metrics, which need no LLM and therefore run in CI.
+isolation with **retrieval-only** metrics, which need no LLM and therefore run in CI. A third
+system, the deterministic **tool router** (ADR-0009, `agent/router.py`), needs no LLM at all and
+provides the zero-cost baseline the generative systems must beat.
+
+### 1.1 Zero-cost evaluation of the LLM agent (no API key)
+
+The agent (`--system agent`) can run against **any** `LLMClient` (ADR-0006, ADR-0011), including
+`--llm ollama`: a local model through [Ollama](https://ollama.com), free, with no API key and no
+network egress beyond `localhost`. This is how the agent's tool selection, grounding and abstention
+behaviour is exercised end to end in this repository without anyone paying for it:
+
+```bash
+brew install ollama && brew services start ollama && ollama pull llama3.2:3b   # ~2 GB, one time
+finsight doctor                                             # confirms Ollama is reachable
+finsight ask "What was Apple's revenue in fiscal 2024?" --llm ollama --system agent
+.venv/bin/python scripts/smoke_test_agent.py --llm ollama    # 12-question manual diagnostic pass
+finsight eval run --system agent --llm ollama --split test --workers 1 --name agent-ollama-test
+```
+
+`--workers 1` is deliberate: Ollama serves one model in one process, so higher worker counts just
+queue instead of adding throughput, and serialising keeps timing interpretable. Generation uses
+`temperature=0, seed=0` for reproducibility (`generation/ollama.py`) - the Ollama default sampling
+gave a different tool call, sometimes a different tool entirely, for an identical question on
+consecutive runs, which the harness's reproducibility principle above rules out.
+
+**What this does and does not prove.** It measures *this specific small model's* tool use, not an
+upper bound on what an LLM agent can do here - `llama3.2:3b` is roughly 1/50th the size of
+`claude-opus-5`. Where the results in [RESULTS](../reports/RESULTS.md) show the free local agent
+losing to the router, that is a finding about this model on this benchmark, never evidence about
+`--llm claude`, which remains unmeasured (a real Anthropic API key and its cost are the only way to
+measure that - see [PORTFOLIO §7](PORTFOLIO.md)). The two must never be conflated in results text.
+Hardware matters too: timings above are from one Apple Silicon laptop; a slower or CPU-only machine
+will take longer per question (the model and timeout are both configurable, `FINSIGHT_OLLAMA__*`).
 
 ## 2. Gold dataset (`data/eval/gold_v1.jsonl`)
 
