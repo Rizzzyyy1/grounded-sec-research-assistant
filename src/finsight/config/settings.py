@@ -118,6 +118,25 @@ class LLMSettings(_Group):
     refusal_fallback_model: str | None = "claude-opus-4-8"
 
 
+class OllamaSettings(_Group):
+    """A local, zero-cost model served by Ollama (https://ollama.com) - no API key needed.
+
+    Ollama must already be running (``ollama serve``, or ``brew services start ollama``) with
+    the configured model pulled (``ollama pull <model>``);
+    :class:`~finsight.generation.ollama.OllamaLLM` fails with an actionable message rather than
+    falling back to a paid provider.
+    """
+
+    base_url: str = "http://localhost:11434"
+    model: str = "llama3.2:3b"
+    #: Context window to request from Ollama (``options.num_ctx``). Larger needs more RAM/VRAM.
+    context_tokens: int = Field(default=8192, ge=256)
+    timeout_s: float = Field(default=120.0, gt=0)
+    #: Retries for *transport* failures only (connection refused, timeout). A 404 "model not
+    #: found" is never retried - retrying it cannot succeed and would just look like a hang.
+    max_retries: int = Field(default=2, ge=0)
+
+
 class Settings(BaseSettings):
     """Root settings object. Obtain it with :func:`get_settings`."""
 
@@ -144,6 +163,7 @@ class Settings(BaseSettings):
     chunking: ChunkingSettings = ChunkingSettings()
     retrieval: RetrievalSettings = RetrievalSettings()
     llm: LLMSettings = LLMSettings()
+    ollama: OllamaSettings = OllamaSettings()
 
     # ------------------------------------------------------------------ derived paths
     @property

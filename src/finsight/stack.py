@@ -20,6 +20,7 @@ from finsight.core.exceptions import ConfigError
 from finsight.core.schemas import Answer, Chunk
 from finsight.generation.llm import AnthropicLLM, LLMClient
 from finsight.generation.offline import ExtractiveLLM
+from finsight.generation.ollama import OllamaLLM
 from finsight.generation.pipeline import RagPipeline
 from finsight.indexing.builder import IndexManifest, verify_manifest
 from finsight.indexing.embeddings import Embedder, make_embedder
@@ -130,4 +131,6 @@ def make_llm(kind: str, settings: Settings) -> LLMClient:
         return ExtractiveLLM()
     if kind == "claude":
         return AnthropicLLM(settings.llm)
-    raise ConfigError(f"unknown --llm {kind!r}; choose 'extractive' or 'claude'")
+    if kind == "ollama":
+        return OllamaLLM(settings.ollama, settings.llm)
+    raise ConfigError(f"unknown --llm {kind!r}; choose 'extractive', 'ollama' or 'claude'")
