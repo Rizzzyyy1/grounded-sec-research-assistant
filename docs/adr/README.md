@@ -17,3 +17,4 @@ Superseded by ADR-x*. Decisions are revisited when evaluation produces contrary 
 | [0009](0009-deterministic-tool-router.md) | A deterministic tool router as the offline, no-LLM system | Accepted |
 | [0010](0010-pin-cik-for-successor-registrants.md) | Pin the CIK for successor registrants; zero filings is a failure | Accepted |
 | [0011](0011-local-free-llm-provider.md) | A local, zero-cost LLM provider (Ollama) alongside Claude | Accepted |
+| [0012](0012-explicit-provider-selection-at-serve-time.md) | Explicit, serve-time LLM provider selection for the API and UI | Accepted |

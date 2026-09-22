@@ -29,7 +29,8 @@ class StubClient:
 
     def ready(self) -> dict[str, Any]:
         return {"status": "ready", "index_chunks": 23221, "embedding_model": "bge", "companies_with_facts": 12,
-                "llm_credentials": False, "default_mode": "router"}  # fmt: skip
+                "llm_credentials": False, "llm_provider": "none: llm_provider=auto but no Claude credentials",
+                "default_mode": "router"}  # fmt: skip
 
     def query(self, question: str, mode: str = "auto") -> dict[str, Any]:
         return ANSWER
@@ -87,7 +88,12 @@ def test_home_shows_status_and_the_router_warning() -> None:
     at = run("app.py")
     assert not at.exception
     assert [m.value for m in at.metric][:2] == ["23,221", "12"]
-    assert any("No Claude credentials" in w.value for w in at.warning)
+    assert any("No LLM is available" in w.value and "--llm ollama" in w.value for w in at.warning)
+
+
+def test_ask_page_shows_which_llm_serves_agent_mode() -> None:
+    at = run("pages/1_Ask.py")
+    assert any("Agent/auto LLM" in c.value for c in at.sidebar.caption)
 
 
 def test_ask_page_renders_answer_sources_and_trace() -> None:

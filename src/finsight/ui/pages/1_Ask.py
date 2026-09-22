@@ -18,9 +18,15 @@ EXAMPLES = [
     "What supply chain risks does Apple describe in fiscal 2024?",
     "Should I buy Tesla stock?",
 ]
+try:
+    llm_provider = ApiClient().ready().get("llm_provider", "unknown")
+except ApiError:
+    llm_provider = "unknown (API unreachable)"
 mode = st.sidebar.selectbox(
-    "Mode", ["auto", "router", "rag", "agent"], help="auto = Claude agent if credentials exist"
-)
+    "Mode", ["auto", "router", "rag", "agent"],
+    help="'agent' and 'auto' use whichever LLM `finsight serve` was started with.",
+)  # fmt: skip
+st.sidebar.caption(f"Agent/auto LLM: **{llm_provider}**")
 example = st.sidebar.selectbox("Examples", ["", *EXAMPLES])
 question = st.text_area(
     "Your question", value=example, height=90, placeholder="Ask about a covered company..."

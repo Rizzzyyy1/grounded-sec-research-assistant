@@ -66,8 +66,10 @@ Pick 3-5 for the role; do not use all of them.
   [`docs/adr/0011-local-free-llm-provider.md`, `docs/ERROR_ANALYSIS.md` §3c, `reports/RESULTS.md`]
 
 **Software engineering**
-* ~9.8k lines of typed Python (mypy strict, ruff clean) with ~6.8k lines of tests (778 hermetic tests, a
-  Hypothesis property test that found a real chunker bug), CI, Docker files, and import-linter
+* ~9.8k lines of typed Python (mypy strict, ruff clean) with ~6.9k lines of tests (~785 hermetic tests
+  as of this writing - these three numbers move with every commit, so treat them as illustrative and
+  run `make test` for the exact current count rather than trusting a hardcoded figure here again; a
+  Hypothesis property test found a real chunker bug), CI, Docker files, and import-linter
   architecture contracts each verified to fail on an injected violation. [`make check`, `pyproject.toml`]
 * FastAPI service with SSE streaming, rate limiting and a Streamlit UI; load-tested on one worker: ~80
   req/s for database-backed endpoints, ~6-7 req/s for hybrid-retrieval questions, 0 errors. [`reports/load_test.md`]
@@ -172,6 +174,6 @@ Nothing here can be done without your accounts, machine or judgement:
 3. **Human-verify `gold_v2`** (`data/eval/gold_v2_draft.jsonl`): this is what turns the probes into a clean holdout.
 4. **Build the Docker image** (`docker compose up`) on a machine with Docker; fix whatever breaks.
 5. **Record a 60-second demo** (screen capture of `finsight ui`).
-6. **Wire a provider choice through the API/UI** (`api/deps.py` currently gates agent mode on
-   `ANTHROPIC_API_KEY` only, so `finsight serve`/`finsight ui` cannot yet serve `--llm ollama` - the
-   CLI can). A reasonable, well-scoped next change, deliberately left undone this round.
+6. ~~Wire a provider choice through the API/UI~~ **Done** (ADR-0012): `finsight serve --llm ollama`
+   (or `FINSIGHT_LLM_PROVIDER=ollama`) serves the agent from the free local model with no API key;
+   verified live end to end (server, `/readyz`, `/v1/query`, and the Streamlit Ask page).

@@ -38,6 +38,10 @@ class Services:
     index_chunks: int
     embedding_model: str
     llm_factory: Callable[[], LLMClient] | None = None  # None -> no generative LLM available
+    #: The provider `llm_factory` was actually built from ("claude" | "ollama"), or the reason it
+    #: could not be, when `llm_factory` is None - always set, so /readyz and error messages can name
+    #: the exact fix instead of a generic "add an API key" (see `api/main.py:build_services`).
+    llm_provider: str = "none: FINSIGHT_LLM_PROVIDER=auto and no Claude credentials were found"
     _answerers: dict[str, Answerer] = field(default_factory=dict)
 
     @property
@@ -52,7 +56,9 @@ class Services:
         chosen = self.default_mode if mode == "auto" else mode
         if chosen in {"agent"} and not self.llm_available:
             raise ConfigError(
-                "mode 'agent' needs Claude credentials (ANTHROPIC_API_KEY or `ant auth login`)"
+                f"mode 'agent' needs a configured LLM, but none is available ({self.llm_provider}). "
+                "Set ANTHROPIC_API_KEY (or `ant auth login`) for Claude, or run "
+                "`ollama serve` + `ollama pull <model>` and start with `finsight serve --llm ollama`."
             )
         return chosen
 

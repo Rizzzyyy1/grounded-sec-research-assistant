@@ -77,3 +77,14 @@ put stable prompt/tool prefix first for caching and verify `cache_read_input_tok
   message), not model-specific hacks, and both would help Claude too if it ever made the same mistake.
   Do not chase every quirk a small model has into a narrow patch, though: some (narrating a fake tool
   call as prose, paraphrasing instead of citing) are genuine small-model limitations to document, not bugs.
+* **`uvicorn.run(..., reload=True)` re-execs the app factory in a fresh subprocess**, so a value only
+  captured in a Python closure (e.g. a CLI flag passed straight into a function argument) does not
+  survive a reload. Set it as an environment variable in the parent process instead (and
+  `get_settings.cache_clear()` if the same process also reads it before reloading) - it is inherited
+  by the subprocess for free, and it is also how `docker-compose.yml`'s `environment:` block or a
+  bare `.env` entry can set the same thing without going through the CLI at all (`finsight serve --llm`).
+* **Verify a new serving path by actually driving it**, not just by testing the handler against fakes:
+  `generation/ollama.py`'s unit tests are all HTTP-mocked, so wiring it into `finsight serve` was
+  additionally checked by starting the real server, a real Streamlit UI, and a real Ollama model, then
+  reading the live `/readyz` and a live `/v1/query` response and clicking through the Ask page in a
+  browser. The unit tests would have stayed green through a wiring mistake the live check would not.

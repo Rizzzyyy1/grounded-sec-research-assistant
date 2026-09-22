@@ -167,8 +167,10 @@ all headline numbers reproducible via one documented command.
 2. **`gold_v2`**: human-verified, naturally phrased, multi-source labels, fresh holdout.
 3. Section-mapping override for filings like JPMorgan's; retrieval-score relevance floor for abstention.
 4. Union the old and new XOM CIKs once FY2026 10-Ks exist.
-5. Wire a provider choice through `finsight serve`/`finsight ui` (`api/deps.py` currently gates agent
-   mode on `ANTHROPIC_API_KEY` only; the CLI already supports `--llm ollama`).
+5. ~~Wire a provider choice through `finsight serve`/`finsight ui`~~ **Done**: `finsight serve --llm
+   {auto,claude,ollama}` (or `FINSIGHT_LLM_PROVIDER`), explicit and non-fallback by construction
+   (ADR-0012). Verified live: `finsight serve --llm ollama`, `/readyz`, `/v1/query`, and the
+   Streamlit Ask page all confirmed end to end with a real local model, zero cost.
 
 ## Stretch ideas
 

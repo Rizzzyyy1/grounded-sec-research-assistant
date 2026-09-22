@@ -107,6 +107,9 @@ class ReadyOut(_Out):
     embedding_model: str
     companies_with_facts: int
     llm_credentials: bool
+    #: Which LLM is actually serving `mode=agent` ("claude", "ollama (<model>)"), or "none: <why>"
+    #: when none is - see `Settings.llm_provider` / `finsight serve --llm`.
+    llm_provider: str
     default_mode: str
 
 

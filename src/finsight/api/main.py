@@ -7,7 +7,7 @@ place, so route handlers stay free of try/except noise.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -30,6 +30,7 @@ from finsight.core.exceptions import (
     RetrievalError,
 )
 from finsight.core.logging import configure_logging, get_logger
+from finsight.generation.llm import LLMClient
 
 log = get_logger("finsight.api")
 
@@ -49,19 +50,46 @@ DESCRIPTION = (
 )
 
 
+def _resolve_llm(settings: Settings) -> tuple[Callable[[], LLMClient] | None, str]:
+    """Build the one LLM factory `finsight serve` will use, or explain why there is none.
+
+    Explicit and non-fallback by construction: whichever branch below runs is the *only* provider
+    for the life of the process. "auto" is Claude-or-nothing on purpose - it never silently picks
+    Ollama, so choosing the free path always means passing ``--llm ollama`` / setting
+    ``FINSIGHT_LLM_PROVIDER=ollama``, never an implicit fallback from a failed paid one (ADR-0011).
+    """
+    from finsight.generation.llm import AnthropicLLM  # noqa: PLC0415
+    from finsight.generation.ollama import OllamaLLM, describe_status  # noqa: PLC0415
+
+    provider = settings.llm_provider
+    if provider in ("auto", "claude"):
+        if have_llm_credentials():
+            return (lambda: AnthropicLLM(settings.llm)), "claude"
+        reason = "no Claude credentials (ANTHROPIC_API_KEY / ant auth login)"
+        if provider == "claude":  # explicitly requested: say so, don't quietly degrade to "auto"
+            reason = f"llm_provider=claude but {reason}"
+        return None, f"none: {reason}"
+    # provider == "ollama": cheap, local, no-cost reachability check up front (no such check
+    # exists for Claude without spending a call) so the degraded reason is exact, not a guess.
+    ok, detail = describe_status(settings.ollama)
+    if not ok:
+        return None, f"none: llm_provider=ollama but {detail}"
+    return (lambda: OllamaLLM(settings.ollama, settings.llm)), f"ollama ({settings.ollama.model})"
+
+
 def build_services(settings: Settings) -> Services:
     """Load the real indexes and stores (used by the lifespan)."""
     from finsight.agent.tools import AgentContext  # noqa: PLC0415
-    from finsight.generation.llm import AnthropicLLM  # noqa: PLC0415
     from finsight.ingestion.xbrl.store import FactStore  # noqa: PLC0415
     from finsight.stack import load_stack  # noqa: PLC0415
 
     stack = load_stack(settings)
     facts = FactStore(settings.fact_db_path)
     ctx = AgentContext(facts=facts, retriever=stack.retriever(), universe=stack.universe)
-    factory = (lambda: AnthropicLLM(settings.llm)) if have_llm_credentials() else None
+    factory, provider = _resolve_llm(settings)
     return Services(settings=settings, ctx=ctx, index_chunks=stack.manifest.n_chunks,
-                    embedding_model=stack.manifest.embedding_model, llm_factory=factory)  # fmt: skip
+                    embedding_model=stack.manifest.embedding_model, llm_factory=factory,
+                    llm_provider=provider)  # fmt: skip
 
 
 def create_app(services: Services | None = None, *, rate_limit: int | None = None) -> FastAPI:

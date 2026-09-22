@@ -291,13 +291,16 @@ python scripts/collect_results.py --readme                                  # re
 finsight serve &  finsight ui          # API on :8000, Streamlit on :8501
 ```
 
-**Try the actual LLM agent for free**, no API key (ADR-0011):
+**Try the actual LLM agent for free**, no API key (ADR-0011) - CLI, or the API and web UI (ADR-0012):
 
 ```bash
 brew install ollama && brew services start ollama && ollama pull llama3.2:3b   # ~2 GB, one time
 finsight doctor                                                                 # confirms it's reachable
 finsight ask "What was Apple's revenue in fiscal 2024?" --llm ollama --system agent
 finsight eval run --system agent --llm ollama --split test --workers 1 --name agent-ollama-test
+
+finsight serve --llm ollama &  finsight ui   # /readyz shows llm_provider: "ollama (llama3.2:3b)"
+# open http://localhost:8501/Ask, pick mode "agent" - answers cost $0.0000, verified live end to end
 ```
 
 With an Anthropic key (`ANTHROPIC_API_KEY` or `ant auth login`) the same commands run Claude instead:
@@ -329,6 +332,7 @@ Not run on the machine this was built on (no Docker); the files are validated st
 |---|---|---|
 | XBRL parsing vs 14 published figures; 0 unexplained gaps; identity holds in 278 periods | `ResearchAgent` tool loop: dev + test + the natural-phrasing probe, all vs the router (ERROR_ANALYSIS 3c) | `--llm claude` specifically; LLM judge; refusal-fallback request shape |
 | Section detection: 60/60 filings yield all core Items | 12-question manual smoke test across 5 categories (`scripts/smoke_test_agent.py`) | Docker images / compose stack |
+| API load test (no LLM), 785 hermetic tests, 6 import-linter contracts | `finsight serve --llm ollama` end to end: `/readyz`, a real `/v1/query`, and the Streamlit Ask page in a browser (ADR-0012) - not load-tested with an LLM in the loop |  |
 | Retrieval ablations, header ablation, metadata-filter effect |  | Streaming beyond replayed trace events |
 | Tool router vs RAG, paired, on held-out companies |  | Human-verified gold set (`gold_v2`) |
 

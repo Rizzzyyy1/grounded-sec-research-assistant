@@ -24,7 +24,7 @@ col1, col2, col3, col4 = st.columns(4)
 col1.metric("Indexed passages", f"{info['index_chunks']:,}")
 col2.metric("Companies with data", info["companies_with_facts"])
 col3.metric("Answer mode", info["default_mode"])
-col4.metric("Claude available", "yes" if info["llm_credentials"] else "no")
+col4.metric("LLM provider", info.get("llm_provider", "unknown").split(":")[0])
 
 st.markdown(
     """
@@ -40,7 +40,8 @@ st.markdown(
 )
 if info["default_mode"] == "router":
     st.warning(
-        "No Claude credentials were found, so answers use the deterministic XBRL tool router (numeric "
-        "questions) and an extractive passage quoter (text questions). Set `ANTHROPIC_API_KEY` and "
-        "restart the API for the full Claude agent."
+        f"No LLM is available ({info.get('llm_provider', 'unknown')}), so answers use the "
+        "deterministic XBRL tool router (numeric questions) and an extractive passage quoter (text "
+        "questions). For the tool-using agent, restart the API with either `finsight serve --llm "
+        "ollama` (free, local - needs `ollama serve` and a pulled model) or `ANTHROPIC_API_KEY` set."
     )

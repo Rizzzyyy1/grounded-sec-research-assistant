@@ -238,3 +238,77 @@ def test_rate_limit_is_configurable_from_settings(
     c = TestClient(create_app(services(ctx)))
     q = {"question": "Should I buy Apple stock?"}
     assert [c.post("/v1/query", json=q).status_code for _ in range(3)] == [200, 200, 429]
+
+
+# ------------------------------------------------------------------ provider selection (ADR-0011)
+def test_readyz_reports_the_active_llm_provider(client: TestClient) -> None:
+    assert client.get("/readyz").json()["llm_provider"].startswith("none:")
+
+
+def test_explicit_agent_request_names_both_free_and_paid_fixes(client: TestClient) -> None:
+    r = client.post("/v1/query", json={"question": "What was Apple's revenue?", "mode": "agent"})
+    assert r.status_code == 503
+    assert "ANTHROPIC_API_KEY" in r.json()["detail"] and "--llm ollama" in r.json()["detail"]
+
+
+def test_resolve_llm_auto_uses_claude_only_when_credentials_exist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from finsight.api.main import _resolve_llm  # noqa: PLC0415
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    factory, provider = _resolve_llm(Settings(llm_provider="auto"))
+    assert factory is None and provider.startswith("none:") and "Claude" in provider
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    factory, provider = _resolve_llm(Settings(llm_provider="auto"))
+    assert factory is not None and provider == "claude"
+
+
+def test_resolve_llm_explicit_claude_without_credentials_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from finsight.api.main import _resolve_llm  # noqa: PLC0415
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    factory, provider = _resolve_llm(Settings(llm_provider="claude"))
+    assert factory is None and provider == "none: llm_provider=claude but no Claude credentials " \
+        "(ANTHROPIC_API_KEY / ant auth login)"  # fmt: skip
+
+
+def test_resolve_llm_ollama_never_falls_back_to_claude_even_if_credentials_exist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The explicit choice is the only one that runs - not a preference, a guarantee."""
+    from finsight.api import main as api_main  # noqa: PLC0415
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # would satisfy "auto"/"claude" too
+    monkeypatch.setattr(
+        "finsight.generation.ollama.describe_status", lambda _s: (True, "reachable, pulled")
+    )
+    factory, provider = api_main._resolve_llm(Settings(llm_provider="ollama"))
+    assert provider == "ollama (llama3.2:3b)"
+    from finsight.generation.ollama import OllamaLLM  # noqa: PLC0415
+
+    assert factory is not None
+    llm = factory()
+    try:
+        assert isinstance(llm, OllamaLLM)
+    finally:
+        llm.close()
+
+
+def test_resolve_llm_ollama_unreachable_is_none_not_an_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from finsight.api.main import _resolve_llm  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        "finsight.generation.ollama.describe_status",
+        lambda _s: (False, "not reachable at http://localhost:11434"),
+    )
+    factory, provider = _resolve_llm(Settings(llm_provider="ollama"))
+    assert factory is None
+    assert provider == "none: llm_provider=ollama but not reachable at http://localhost:11434"

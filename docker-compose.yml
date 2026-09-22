@@ -5,7 +5,10 @@
 #   docker compose run --rm api finsight process   # parse + chunk
 #   docker compose run --rm api finsight index     # embed into the Qdrant server (slow on CPU)
 #
-# Set FINSIGHT_SEC__USER_AGENT and (optionally) ANTHROPIC_API_KEY in .env - see .env.example.
+# Set FINSIGHT_SEC__USER_AGENT and (optionally) ANTHROPIC_API_KEY or FINSIGHT_LLM_PROVIDER=ollama
+# in .env - see .env.example. For the free Ollama path, Ollama must run on the HOST (not in this
+# compose stack) and the api container needs FINSIGHT_OLLAMA__BASE_URL=http://host.docker.internal:11434
+# (Docker Desktop's name for the host; untested - this stack has not been built/run, see LIMITATIONS.md).
 name: finsight
 
 services:

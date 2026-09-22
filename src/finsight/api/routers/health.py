@@ -22,11 +22,12 @@ def readyz(request: Request, response: Response) -> ReadyOut:
     if services is None:
         response.status_code = 503
         return ReadyOut(status="degraded", index_chunks=0, embedding_model="", companies_with_facts=0,
-                        llm_credentials=False, default_mode="none")  # fmt: skip
+                        llm_credentials=False, llm_provider="none: service is starting up",
+                        default_mode="none")  # fmt: skip
     with services.ctx.db_lock:
         companies = len(services.ctx.facts.tickers())
     return ReadyOut(
         status="ready", index_chunks=services.index_chunks, embedding_model=services.embedding_model,
         companies_with_facts=companies, llm_credentials=services.llm_available,
-        default_mode=services.default_mode,
+        llm_provider=services.llm_provider, default_mode=services.default_mode,
     )  # fmt: skip

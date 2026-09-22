@@ -158,6 +158,12 @@ class Settings(BaseSettings):
     embedding: EmbeddingSettings = EmbeddingSettings()
     #: Qdrant server URL (docker compose). None = embedded, single-process local storage.
     qdrant_url: str | None = None
+    #: Which LLM `finsight serve` builds for agent mode. "auto" is the only implicit choice, and it
+    #: is Claude-or-nothing (never Ollama) to keep provider selection explicit everywhere else - set
+    #: this (or pass `finsight serve --llm ollama`) to opt into the free local path. Whichever value
+    #: is resolved is fixed for the life of the process; a failure never falls back to another
+    #: provider (`api/main.py:build_services`).
+    llm_provider: Literal["auto", "claude", "ollama"] = "auto"
     #: Queries per minute allowed per client on the (LLM-cost-bearing) /v1/query endpoints.
     api_rate_limit: int = Field(default=30, ge=1)
     chunking: ChunkingSettings = ChunkingSettings()

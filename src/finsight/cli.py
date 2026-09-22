@@ -646,11 +646,28 @@ def serve(
     host: Annotated[str, typer.Option(help="Bind address.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port.")] = 8000,
     reload: Annotated[bool, typer.Option(help="Auto-reload (development).")] = False,
+    llm: Annotated[
+        str | None,
+        typer.Option(
+            help="Agent mode's provider: 'claude' (needs an API key), 'ollama' (free, local, "
+            "needs `ollama serve`), or 'auto' (Claude if credentials exist, else router-only - "
+            "never Ollama, provider selection is always explicit). Default: FINSIGHT_LLM_PROVIDER "
+            "or 'auto'. Never falls back to another provider if the chosen one is unavailable."
+        ),
+    ] = None,
 ) -> None:
     """Run the HTTP API (needs the `api` extra and built indexes)."""
+    import os  # noqa: PLC0415
+
     import uvicorn  # noqa: PLC0415
 
+    if llm is not None:
+        if llm not in ("auto", "claude", "ollama"):
+            raise _fail(f"--llm must be 'auto', 'claude' or 'ollama', got {llm!r}")
+        os.environ["FINSIGHT_LLM_PROVIDER"] = llm
+        get_settings.cache_clear()  # in-process re-reads must see the override too
     settings = get_settings()
+    console.print(f"FinSight API -> http://{host}:{port}  (llm_provider={settings.llm_provider})")
     uvicorn.run(
         "finsight.api.main:app_factory",
         factory=True,
