@@ -96,6 +96,12 @@ def run_checks() -> list[Check]:
         )
     )
 
+    if importlib.util.find_spec("httpx") is not None:
+        from finsight.generation.ollama import describe_status  # noqa: PLC0415
+
+        ok, detail = describe_status(settings.ollama)
+        checks.append(Check(f"Ollama ({settings.ollama.model})", ok, detail, required=False))
+
     for extra, modules in _EXTRAS.items():
         missing = [m for m in modules if importlib.util.find_spec(m) is None]
         # Name is "extra: x", not "extra [x]": rich would parse "[x]" as markup and drop it.
@@ -387,17 +393,26 @@ def _fail(message: str) -> typer.Exit:
 def ask(
     question: Annotated[str, typer.Argument(help="Your question about the covered companies.")],
     llm: Annotated[
-        str, typer.Option(help="'claude' (needs an API key) or 'extractive' (offline).")
+        str,
+        typer.Option(
+            help="'claude' (needs an API key), 'ollama' (free, local, needs `ollama serve`), "
+            "or 'extractive' (offline, no model)."
+        ),
     ] = "claude",
+    system: Annotated[
+        str, typer.Option(help="'rag' (single-shot), 'router' (no LLM) or 'agent' (tool loop).")
+    ] = "rag",
     sources: Annotated[bool, typer.Option("--sources", help="Show the cited passages.")] = False,
 ) -> None:
     """Ask a question; get a cited, validated answer."""
+    from finsight.ingestion.xbrl.store import FactStore  # noqa: PLC0415
     from finsight.stack import load_stack, make_llm  # noqa: PLC0415
 
     settings = get_settings()
     try:
+        facts = FactStore(settings.fact_db_path) if settings.fact_db_path.is_file() else None
         with load_stack(settings) as stack:
-            answer = stack.pipeline(make_llm(llm, settings)).answer(question)
+            answer = stack.system(system, make_llm(llm, settings), facts)(question)
     except FinSightError as exc:
         raise _fail(str(exc)) from exc
 
@@ -523,7 +538,10 @@ def eval_run(
         str, typer.Option(help="rag, router (XBRL tools, no LLM) or agent (Claude).")
     ] = "rag",
     llm: Annotated[
-        str, typer.Option(help="'claude' or 'extractive' (the LLM used by rag/agent).")
+        str,
+        typer.Option(
+            help="'claude', 'ollama' (free, local) or 'extractive' (LLM used by rag/agent)."
+        ),
     ] = "extractive",
     split: Annotated[str, typer.Option(help="dev, test or all.")] = "dev",
     workers: Annotated[int, typer.Option(help="Concurrent questions.")] = 4,
