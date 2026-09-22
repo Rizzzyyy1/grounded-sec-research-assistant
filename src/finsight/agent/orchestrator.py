@@ -6,7 +6,9 @@ module docstring): send the question and tool definitions; if the model
 asks for tools, run them (in parallel when independent), return *all* results in one user turn,
 and repeat until it answers or the step budget runs out. Then validate the answer exactly like the
 baseline does: citations must resolve to passages the tools surfaced, and every figure must appear
-in a tool result or a cited passage.
+in a tool result or a cited passage. Any citation label the model wrote that does not resolve is
+rewritten before the answer is returned (``generation/citations.py::repair_citations``) - a local
+model citing a source_id no tool call ever registered must never reach the user looking valid.
 
 Design rules:
 * the loop is **bounded** (``llm.max_agent_steps``); on exhaustion the model is asked once more,
@@ -27,7 +29,7 @@ from finsight.agent.tools import AgentContext, SourceRegistry, ToolError, dispat
 from finsight.config.settings import LLMSettings
 from finsight.core.logging import bind_trace_id, get_logger
 from finsight.core.schemas import Answer, QueryType, ToolCallRecord, Usage
-from finsight.generation.citations import validate_citations
+from finsight.generation.citations import repair_citations, validate_citations
 from finsight.generation.guardrails import is_out_of_scope
 from finsight.generation.llm import LLMClient, ToolUse
 from finsight.generation.prompts import ABSTAIN_TOKEN, DECLINE_ADVICE, NO_EVIDENCE
@@ -142,7 +144,7 @@ class ResearchAgent:
         for w in warnings:
             log.warning("agent.validation", warning=w)
         return finish(
-            text=text, citations=report.citations, model=model, usage=usage,
+            text=repair_citations(text, report), citations=report.citations, model=model, usage=usage,
             tool_calls=tuple(records), warnings=warnings,
         )  # fmt: skip
 

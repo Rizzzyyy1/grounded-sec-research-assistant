@@ -125,7 +125,12 @@ def citation_hygiene_section() -> list[str]:
         "citing nothing, or citing a source that does not exist. The router's text fallback and the "
         "free local agent both score far below the extractive baseline (which can only ever quote, so "
         'it is close to 100% by construction) - this is the more honest read of how "grounded" each '
-        "system actually is, and it is not visible in the accuracy tables above.",
+        'system actually is, and it is not visible in the accuracy tables above. "Citing a source '
+        'that does not exist" is still counted as a failure here either way, but it no longer reaches '
+        "the reader looking like a real citation: any label the model writes that this run cannot "
+        "back up is rewritten to `[unverified]` before the answer leaves the pipeline "
+        "(`generation/citations.py::repair_citations`, ERROR_ANALYSIS.md row 26) - confirmed to leave "
+        "these numbers unchanged by re-running the natural-phrasing probe after the fix.",
         "",
         "| System | dev | test |",
         "|---|---|---|",

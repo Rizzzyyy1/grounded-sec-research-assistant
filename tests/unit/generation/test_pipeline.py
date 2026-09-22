@@ -154,24 +154,37 @@ def test_model_abstention_is_recognised(make_chunk: ChunkFactory) -> None:
 
 
 @pytest.mark.parametrize(
-    ("text", "expected_fragment"),
+    ("text", "expected_fragment", "expected_text"),
     [
-        ("Net sales were $391,035 million in fiscal 2024 [S9].", "unknown source S9"),
+        # an invalid citation is both flagged AND rewritten - a reader must never see a bracket
+        # that looks like a resolved source but points at nothing.
+        (
+            "Net sales were $391,035 million in fiscal 2024 [S9].",
+            "unknown source S9",
+            "Net sales were $391,035 million in fiscal 2024 [unverified].",
+        ),
         (
             "Apple reported a very strong year across all of its product lines worldwide.",
             "uncited claim",
+            "Apple reported a very strong year across all of its product lines worldwide.",
         ),
-        ("Net sales were $391.0 billion in fiscal 2024 [S1].", "unverified figure: $391.0"),
+        # a *valid* citation with an unverified figure is a different problem (the number, not the
+        # source) - the answer keeps its real citation and is only flagged, not rewritten.
+        (
+            "Net sales were $391.0 billion in fiscal 2024 [S1].",
+            "unverified figure: $391.0",
+            "Net sales were $391.0 billion in fiscal 2024 [S1].",
+        ),
     ],
 )
-def test_validation_problems_become_warnings_not_silent_answers(
-    make_chunk: ChunkFactory, text: str, expected_fragment: str
+def test_validation_problems_become_warnings_and_invalid_citations_are_rewritten(
+    make_chunk: ChunkFactory, text: str, expected_fragment: str, expected_text: str
 ) -> None:
     answer = pipeline(make_chunk, ScriptedLLM(text)).answer(
         "What were Apple's net sales in fiscal 2024?"
     )
     assert any(expected_fragment in w for w in answer.warnings), answer.warnings
-    assert answer.text == text  # the answer is returned as-is, with the problems flagged
+    assert answer.text == expected_text
 
 
 def test_generation_errors_propagate(make_chunk: ChunkFactory) -> None:

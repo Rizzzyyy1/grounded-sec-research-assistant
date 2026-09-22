@@ -3,6 +3,13 @@
 The model cites with ``[S1]`` labels. This module checks that every label refers to a source we
 actually provided, turns valid ones into :class:`Citation` objects (with a display quote and the
 filing URL), and finds *uncited* sentences - the claims a reader cannot trace to a passage.
+
+``validate_citations`` alone is not enough to make an answer trustworthy: it reports which labels
+are invalid, but the raw model text still contains them verbatim, so a reader sees what looks like
+a resolved citation pointing at nothing (observed live with a local 3B model: it wrote ``[S1]``
+after a figure even though no ``search_filings`` call had ever registered an ``S1``).
+``repair_citations`` is the general rule that closes that gap: every bracket a *user* sees in the
+final answer must resolve to evidence this run actually produced, or it is rewritten to say so.
 """
 
 from __future__ import annotations
@@ -20,6 +27,7 @@ _LABEL = re.compile(r"S\d+", re.IGNORECASE)
 _SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z$\d]|\[(?!S\d))")
 _QUOTE_CHARS = 280
 _MIN_WORDS_FOR_CLAIM = 6
+UNVERIFIED_MARKER = "[unverified]"
 
 
 @dataclass(frozen=True)
@@ -81,3 +89,27 @@ def validate_citations(answer: str, context: Context) -> CitationReport:
             if not any(context.get(lbl.upper()) for g in labels for lbl in _LABEL.findall(g)):
                 uncited.append(sentence)
     return CitationReport(tuple(citations), tuple(invalid), tuple(uncited))
+
+
+def repair_citations(answer: str, report: CitationReport) -> str:
+    """Rewrite every bracket in ``answer`` so it only ever shows a citation the run can back up.
+
+    This is the general rule, applied identically regardless of which system produced the answer
+    or what the question was about: a label is kept (labels within one bracket deduplicated) only
+    if it names a source in ``report.citations``; a bracket left with no valid label - an unknown
+    id, a repeated invalid id, or a citation attempted with no evidence available at all - becomes
+    :data:`UNVERIFIED_MARKER` instead of vanishing or staying as a dangling, unresolvable pointer.
+    The claim itself is never deleted, only its citation is corrected - that keeps the answer
+    useful while making an unsupported claim visibly different from a supported one.
+    """
+    valid_ids = {c.source_id for c in report.citations}
+
+    def repl(match: re.Match[str]) -> str:
+        kept: list[str] = []
+        for raw in _LABEL.findall(match.group(1)):
+            label = raw.upper()
+            if label in valid_ids and label not in kept:
+                kept.append(label)
+        return f"[{', '.join(kept)}]" if kept else UNVERIFIED_MARKER
+
+    return _LABEL_GROUP.sub(repl, answer)

@@ -17,7 +17,7 @@ from finsight.config.settings import LLMSettings
 from finsight.core.filters import RetrievalFilters
 from finsight.core.logging import bind_trace_id, get_logger
 from finsight.core.schemas import Answer, QueryType, Usage
-from finsight.generation.citations import validate_citations
+from finsight.generation.citations import repair_citations, validate_citations
 from finsight.generation.context import build_context
 from finsight.generation.guardrails import flag_suspicious_sources, is_out_of_scope
 from finsight.generation.llm import LLMClient
@@ -121,7 +121,7 @@ class RagPipeline:
         for warning in warnings:
             log.warning("answer.validation", warning=warning)
         return finish(
-            text=text,
+            text=repair_citations(text, report),
             citations=report.citations,
             query_type=query_type,
             model=llm_result.model,

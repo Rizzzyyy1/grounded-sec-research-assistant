@@ -186,11 +186,17 @@ def test_passages_get_citations_and_a_figure_not_in_any_tool_result_is_flagged(
 
 
 def test_invalid_label_and_uncited_claim_are_flagged(ctx: AgentContext) -> None:
+    """Regression: a live free-path query cited [S1] with no search_filings call ever made in
+    that run, so the source_id could not resolve - the answer must not show that bracket as if it
+    were a real citation (see generation/citations.py::repair_citations)."""
     llm = ScriptedAgentLLM(
         turn("Apple manufactures most of its products through partners in Asia [S9].")
     )
     a = agent(ctx, llm).answer("Where does Apple manufacture products?")
     assert any("unknown source S9" in w for w in a.warnings)
+    assert "[S9]" not in a.text
+    assert "[unverified]" in a.text
+    assert a.citations == ()
 
 
 def test_step_budget_forces_a_final_answer_without_tools(ctx: AgentContext) -> None:

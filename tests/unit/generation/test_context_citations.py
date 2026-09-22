@@ -5,8 +5,15 @@ from __future__ import annotations
 import pytest
 
 from finsight.core.schemas import RetrievedChunk
-from finsight.generation.citations import cited_ids, strip_labels, validate_citations
-from finsight.generation.context import build_context, render_source
+from finsight.generation.citations import (
+    UNVERIFIED_MARKER,
+    CitationReport,
+    cited_ids,
+    repair_citations,
+    strip_labels,
+    validate_citations,
+)
+from finsight.generation.context import Context, build_context, render_source
 from finsight.generation.verification import figures_in, normalise, unverified_numbers
 
 from tests.unit.conftest import ChunkFactory  # isort: skip
@@ -130,6 +137,64 @@ def test_short_lead_ins_and_abstentions_are_not_flagged(make_chunk: ChunkFactory
 
 def test_strip_labels() -> None:
     assert strip_labels("A [S1] b [S2, S3].") == "A  b ."
+
+
+# ------------------------------------------------------------------ repair_citations
+def test_valid_citation_passes_through_unchanged(make_chunk: ChunkFactory) -> None:
+    ctx = build_context([rc(make_chunk("passage"))], budget_tokens=999)
+    text = "Apple grew revenue this year [S1]."
+    report = validate_citations(text, ctx)
+    assert repair_citations(text, report) == text
+
+
+def test_unknown_id_becomes_the_unverified_marker() -> None:
+    """Regression: a live Ollama query cited [S1] with no search_filings call ever made - the
+    raw model text still showed the bracket even though `validate_citations` already knew it was
+    invalid, so a reader saw what looked like a resolved citation pointing at nothing."""
+    text = "Coca-Cola's revenue in 2023 was $45,754 million [S1]."
+    report = validate_citations(text, Context(sources=(), text="", tokens=0))
+    assert report.invalid_ids == ("S1",)
+    repaired = repair_citations(text, report)
+    assert "[S1]" not in repaired
+    assert UNVERIFIED_MARKER in repaired
+    assert "Coca-Cola's revenue in 2023 was $45,754 million" in repaired  # claim is preserved
+
+
+def test_repeated_valid_id_in_one_bracket_is_deduplicated(make_chunk: ChunkFactory) -> None:
+    ctx = build_context([rc(make_chunk("passage"))], budget_tokens=999)
+    text = "Costs fell sharply this quarter [S1, S1]."
+    report = validate_citations(text, ctx)
+    assert repair_citations(text, report) == "Costs fell sharply this quarter [S1]."
+
+
+def test_repeated_citation_across_sentences_each_resolve_independently(
+    make_chunk: ChunkFactory,
+) -> None:
+    ctx = build_context([rc(make_chunk("passage"))], budget_tokens=999)
+    text = "Revenue grew this year [S1]. Margins held steady too [S1]."
+    report = validate_citations(text, ctx)
+    assert repair_citations(text, report) == text
+
+
+def test_mixed_bracket_keeps_the_valid_label_and_drops_the_invalid_one(
+    make_chunk: ChunkFactory,
+) -> None:
+    ctx = build_context([rc(make_chunk("passage"))], budget_tokens=999)
+    text = "Growth accelerated across regions [S1, S9]."
+    report = validate_citations(text, ctx)
+    assert repair_citations(text, report) == "Growth accelerated across regions [S1]."
+
+
+def test_answer_with_no_evidence_available_marks_every_citation_unverified() -> None:
+    """No sources were ever registered for this run (e.g. the agent called only numeric tools,
+    never search_filings) - every bracket the model wrote is necessarily unresolvable."""
+    empty = CitationReport(citations=(), invalid_ids=("S1", "S2"), uncited_sentences=())
+    text = "Nvidia's data center revenue rose [S1]. Gaming revenue was roughly flat [S2]."
+    repaired = repair_citations(text, empty)
+    assert "[S1]" not in repaired and "[S2]" not in repaired
+    assert repaired.count(UNVERIFIED_MARKER) == 2
+    assert "Nvidia's data center revenue rose" in repaired
+    assert "Gaming revenue was roughly flat" in repaired
 
 
 # ------------------------------------------------------------------ numeric consistency

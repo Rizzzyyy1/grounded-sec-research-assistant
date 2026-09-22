@@ -152,6 +152,21 @@ detail, and comparing chunkers by chunk-id recall would be circular.
 | **Abstention accuracy** | F1 of abstain decision on answerable vs. unanswerable | Over-abstaining is penalised too |
 | **Tool correctness** (agent) | required tools called, arguments match gold | |
 
+The row above ("Citation precision"/"Citation recall") is the aspirational, LLM-judged design.
+What actually ships and runs on every eval, with no LLM and no judge, is a stricter rule:
+`evaluation/metrics/generation.py::citation_hygiene` marks an answer **clean** only if it has at
+least one citation *and* none of its warnings are `citation to unknown source`, `uncited claim`, or
+`unverified figure` - see the "Citation hygiene" table in [RESULTS](../reports/RESULTS.md) for the
+measured rates per system. An unresolvable citation (a label the model wrote that names no source
+this run produced) always counts as a hygiene failure under this rule, whether or not the *raw
+answer text* happened to show the broken bracket - `generation/citations.py::repair_citations`
+rewrites that bracket to `[unverified]` before the answer reaches a user, but it does not and
+cannot change whether the metric above treats the answer as clean (ERROR_ANALYSIS.md row 26).
+Confirmed by re-running `agent-ollama-natural` (`data/eval/gold_v2_draft.jsonl`) after the fix:
+accuracy 0.808 and citation hygiene 7.7%, identical to the pre-fix run -
+`reports/runs/20260922-214435-agent-ollama-natural-citation-fix/` vs
+`reports/runs/20260922-052052-agent-ollama-natural/`.
+
 ### 3.3 System
 
 Latency p50 / p95 (end-to-end and per stage), input/output/cached tokens, **cost per query**, and

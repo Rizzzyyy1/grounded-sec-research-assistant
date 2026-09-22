@@ -81,6 +81,7 @@ generative layer has something to add.
 | 23 | Notebook 04 counted all 9 retrieval misses as "found at rank 2-8" (`if NaN:` is truthy in pandas) and printed "0 right-filing misses" | Reading the executed output against the evidence table beside it | `pd.isna`, plus an assertion that the bucket total equals the metric it explains |
 | 24 | A tool argument given as a JSON-*string* array (e.g. `fiscal_years: "[2024]"` instead of `[2024]`) crashed with `invalid literal for int() with base 10: '['` | Agent smoke test, `--llm ollama` (§3c) | `agent/tools._as_list` accepts a list, a JSON-encoded string, or a bare scalar |
 | 25 | Asking for a ratio (`roe`) through `get_financial_metric` failed with only a list of *reported* metric names, giving the model nothing to recover with | Agent smoke test, `--llm ollama` (§3c) | `_metric` names `compute_ratio` explicitly when the requested name is a known ratio; `test_errors_are_actionable_for_the_model` |
+| 26 | **A citation the model wrote that resolved to no real source stayed in the *displayed* answer.** `validate_citations` already flagged it as invalid, but only in `warnings` - the raw text (what the CLI/API/UI actually shows) still had `"... $45,754 million. [S1]"` even though no `search_filings` call that run had ever registered an `S1`. Most common on numeric-tool answers: the prompt says tool figures need no bracket, so any bracket the model adds there is definitionally unresolvable | Live `finsight serve --llm ollama` query, "What was Coca-Cola revenue in 2023?" → `citations: []`, `warnings: ["citation to unknown source S1"]`, but `text` still ended in `[S1]` | `generation/citations.py::repair_citations` rewrites every bracket to only ever show labels present in `report.citations`; a bracket left with none becomes `[unverified]` - the claim stays, the fake pointer doesn't. Wired into both `generation/pipeline.py` and `agent/orchestrator.py` (the one shared rule, not a per-question patch). 6 new tests in `test_context_citations.py` (valid / unknown / duplicate-in-bracket / duplicate-across-sentences / mixed valid+invalid / zero-evidence-available); re-running `agent-ollama-natural` after the fix reproduced identical accuracy (0.808) and citation hygiene (7.7%) - this is a display fix, not a scoring change - and showed 7 of 38 stored answers changed text, 6 of them exactly this bug (`reports/runs/20260922-214435-agent-ollama-natural-citation-fix/`) |
 
 ## 3b. Natural-phrasing probe (router and RAG baseline on `gold_v2_draft`, 38 questions)
 
@@ -121,10 +122,16 @@ gold data - never added to `data/eval/`). Full trace: `reports/smoke_test_agent_
   share of answers with a valid citation and no flagged claim/figure is **4.2% (dev) / 0.0% (test) /
   7.7% (natural)**, against the router's 36.8-38.6% and the extractive baseline's 96.6-100% (which
   can only ever quote, so it is close to 100% by construction) - see "Citation hygiene" in
-  [RESULTS](../reports/RESULTS.md). Observed on repeated runs: (a) a
+  [RESULTS](../reports/RESULTS.md). None of these percentages moved after the fix below - they
+  count an unresolvable citation as a hygiene failure either way; what changed is what the *reader*
+  sees when one happens. Observed on repeated runs: (a) a
   bogus `[S1]`-style citation appended to a *tool-sourced* number, where the prompt explicitly says
-  figures from tools need no bracket - `validate_citations` correctly flags this as "citation to
-  unknown source", which is the safety mechanism working, not failing; (b) answering a
+  figures from tools need no bracket - `validate_citations` correctly flagged this as "citation to
+  unknown source" in `warnings`, but until row 26 above the displayed answer still showed the raw,
+  unresolvable `[S1]`; a reader who only sees `answer.text` (every CLI, API and UI surface) had no
+  way to tell it apart from a real one. Fixed: the bracket is now rewritten to `[unverified]` before
+  the answer leaves `pipeline.py`/`orchestrator.py`, so the flag the warning was already raising is
+  now visible in the one place a user actually reads; (b) answering a
   qualitative question (Tesla risk factors, Amazon sustainability) with fluent, plausible-sounding
   prose that is mostly **uncited** even though `search_filings` returned real passages - the model
   paraphrased from its own training-data familiarity with these companies instead of grounding in
