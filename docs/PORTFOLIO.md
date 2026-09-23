@@ -170,9 +170,12 @@ Nothing here can be done without your accounts, machine or judgement:
    alongside the free-local-model ones already in the README - do not replace them, the comparison
    between a 3B free model and Claude is itself a finding. Until then those cells say "not run" — leave
    them that way.
-2. ~~Push to GitHub and confirm CI is green; replace the `your-username` placeholders~~ **In
-   progress**: repository created (`github.com/Rizzzyyy1/grounded-sec-research-assistant`),
-   placeholders replaced - see ERROR_ANALYSIS.md §3i for the push and CI result.
+2. ~~Push to GitHub and confirm CI is green; replace the `your-username` placeholders~~ **Done**:
+   repository created (`github.com/Rizzzyyy1/grounded-sec-research-assistant`, public), placeholders
+   replaced, `main` pushed at `c9cd9e1`, CI green on all three Python versions after two rounds of
+   a real bug found only by watching the actual workflow run (an ANSI-color rendering quirk in a
+   `--help`-output test, not reproducible from local checks alone) - full story in
+   ERROR_ANALYSIS.md §3i.
 3. **Human-verify `gold_v2`** (`data/eval/gold_v2_draft.jsonl`): this is what turns the probes into a clean holdout. Procedure and worksheet: `docs/GOLD_V2_REVIEW_CHECKLIST.md` / `reports/gold_v2_review_worksheet.md` - prepared, not completed; no label has been approved.
 4. ~~Build the Docker image (`docker compose up`) on a machine with Docker; fix whatever breaks~~
    **Done**: built and run live end to end (three healthy containers, UI opened in a browser, a

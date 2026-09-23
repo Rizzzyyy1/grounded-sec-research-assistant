@@ -802,6 +802,82 @@ both needed an actual `docker compose up` to surface. `make docker-smoke` is the
 reruns everything checked live in this section; run it again before ever claiming Docker "works" in
 the future; do not re-assert that claim from the compose file alone.
 
+## 3i. Publishing to GitHub, and a CI failure static review would never have caught
+
+Docker (3h) turned "written but never run" into "run and verified." The same was true of GitHub:
+`README.md`/`pyproject.toml` had always pointed at a `your-username/finsight` placeholder, and no
+remote had ever existed. This section made that real, and found a real CI bug along the way.
+
+### Before touching anything: inspection and a git-identity correction
+
+A prior session's global git identity had drifted to the wrong name for several commits. That was
+corrected first (repo-local `user.name`/`user.email` set to the real identity, only the 7 affected
+commits - all unpublished, since no remote existed yet - rewritten with a backup branch kept
+locally, never pushed). Publishing only proceeded after that was verified clean: `main` at 7
+corrected commits followed by 15 already-correct ones, working tree clean, no secrets or `.env` in
+the tracked file list, no large generated files, only placeholder emails (`*@example.com`) in
+tracked content.
+
+### Finding the repository, honestly
+
+No existing `finsight`-named repository existed under the authenticated GitHub account, and the
+project's own docs only ever used a placeholder - so the repository name and visibility were both
+asked of the user rather than assumed (`Rizzzyyy1/grounded-sec-research-assistant`, public,
+matching the descriptive-hyphenated naming pattern of the account's other repos rather than
+FinSight's own short internal package name, which was kept everywhere else - the CLI, the Python
+package, `pyproject.toml`'s `[project] name` - unchanged).
+
+### The CI failure: two wrong-then-right diagnoses, in order
+
+The first push's CI run failed identically on all three Python versions
+(`tests/unit/test_cli.py::test_serve_and_ui_show_help_without_starting_anything`) - the model
+matches this project's own established pattern of a `--help` string check, and it had passed in
+every local `make check` run this whole project's history. **First diagnosis (wrong):** the test's
+`"--port" in result.stdout` check depends on Rich's terminal-width-driven wrapping, and CI runs
+with no real terminal attached; a narrow enough width truncates `"--port"` to `"-…"`. That
+mechanism is real (reproduced locally by forcing `COLUMNS=20`) but forcing `COLUMNS=200` in the
+test's `CliRunner.invoke(..., env=...)` and pushing did **not** fix CI - the exact same failure
+recurred. **Second diagnosis (the actual cause):** reproduced only once color output was *also*
+forced locally (`FORCE_COLOR=1`) - Rich's option-name highlighter styles a leading `"-"` and the
+rest of the flag (`"-port"`) as two *separately colored ANSI spans*, so the raw captured string
+never contains a contiguous `"--port"` substring once color is active, at any width. CI enables
+ANSI color even with no terminal attached (this developer's local shell, for whatever reason,
+usually doesn't - which is exactly why the bug never surfaced in dozens of local `make check` runs
+across this whole project). Fix: strip ANSI escape codes from the captured output before the
+substring check (`_ANSI = re.compile(r"\x1b\[[0-9;]*m")`), keeping the width override too since
+that failure mode is real and independent. Verified against three cases before pushing again: the
+normal case, color forced, and (confirming the width mechanism is still a real, separate risk)
+a narrow-width override.
+
+**The general lesson, not just the specific fix:** a CLI `--help`-output assertion that checks a
+raw substring is implicitly coupled to whatever rendering environment happens to produce that
+string - width *and* color, and possibly more Rich features neither of these two rounds needed to
+invoke. `make check`, run entirely locally, could not have caught this: the bug required an
+environment CI has and this developer's shell does not. It was only found by actually publishing
+and watching the real workflow run, exactly what this section's own brief asked for - "do not claim
+CI passed based on local checks alone."
+
+### Result
+
+Three pushes, three CI runs (`35872754286` fail, `35873510776` fail, `35874122812` **pass**), all
+three matrix legs (Python 3.11/3.12/3.13) green on the third. Repository:
+`https://github.com/Rizzzyyy1/grounded-sec-research-assistant`, `main` at `c9cd9e1`, matching the
+remote exactly (`git ls-remote origin main` verified equal to local `git rev-parse main`). Only
+`main` was ever pushed - `backup/pre-identity-fix` has no remote tracking branch and was confirmed
+absent from `git ls-remote origin` output. No force-push, no history rewrite beyond the one already
+reported and confirmed unpublished in the prior session, no visibility change (repository created
+public, as asked, and never touched again).
+
+### What remains unverified, disclosed rather than assumed
+
+* **This CI configuration has now been observed to pass, once**, not stress-tested for its own
+  flakiness the way the citation/Docker sections above stress-tested their mechanisms - a
+  regression here would only be caught by the next real push.
+* **No pull-request path exercised.** `ci.yml` also triggers on `pull_request`; only the `push`
+  trigger on `main` has actually run.
+* **Repository settings beyond visibility** (branch protection, required reviews, secrets, Pages,
+  etc.) were not configured and are not claimed to be - out of scope for "publish and verify CI."
+
 ## 4. Design changes forced by evidence
 
 * **Reranker is opt-in** (ablation A1: better ordering, no recall gain, ~16× latency) — ADR-0002 amended.
