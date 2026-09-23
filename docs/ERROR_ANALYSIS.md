@@ -457,6 +457,225 @@ fix added zero accuracy risk on top of it).
   prompt's own instruction) affecting one question in this sample - noted, not chased into a
   general fix from a single occurrence.
 
+## 3g. Auditing automatic attribution: does the evidence actually support the claim?
+
+§3f closed the largest citation-hygiene bucket by attaching a real citation wherever an uncited
+sentence shared enough vocabulary with a retrieved passage. That check (bag-of-words overlap) is a
+*lexical* signal, not an entailment judgement, and the request that triggered this audit was
+specific: lexical overlap does not by itself prove a passage supports a claim. Before trusting
+§3f's numbers, every kind of citation this system produces was read manually against the real,
+full underlying evidence - not the 280-character trimmed quote a reader sees - and judged as
+*supports the whole claim*, *contradicts it*, or *insufficient*.
+
+### Review sample
+
+Free local setup only (`--llm ollama`), no threshold tuned against an individual `gold_v2_draft`
+answer. The sample spans every category requested: automatically attached citations, model-written
+citations, uncited claims, numeric claims, comparisons, negative statements, and claims about
+change over time. Sentence, passage/fact, URL and tool trace are quoted exactly as the live system
+produced them (`reports/runs/20260923-030441-agent-ollama-natural-attribution-fix/results.jsonl`
+for the pre-audit mechanism, `.../20260923-042656-agent-ollama-natural-audit-fix/results.jsonl` and
+this section's own live-instrumented traces for the audited/fixed one).
+
+| # | Category | Question | Answer sentence (exact) | Cited evidence (exact) | Tool trace | Judgement |
+|---|---|---|---|---|---|---|
+| 1 | Auto-attached | `nat-txt-036`, JNJ talc litigation | *"The company believes it has strong legal grounds to contest the other talc verdicts it has appealed, but has settled cases in certain circumstances."* → `[S1]` | `S1` full chunk (1,523 chars, only the first 280 shown in the UI quote): *"Matters concerning talc... [chunk continues past the display trim to] ...the Company believes it has valid legal grounds to contest the allegations underlying the pending talc lawsuits... the Company has agreed to settle certain talc-related lawsuits..."* | `search_filings(query="talc litigation Johnson & Johnson", tickers=["JNJ"])` → registered `S1` | **Supports.** True positive - but only visible by reading past the UI's 280-char trim (see "audit's own error" below). |
+| 2 | Auto-attached (pre-fix; now excluded) | `nat-txt-030`, Walmart e-commerce plan | *"Walmart's plan for growing its e-commerce business includes investing in digital transformation and ways of work, providing ongoing growth, development, and learning opportunities for associates, and prioritizing the emotional, physical, and financial well-being of associates."* → was `[S5]` at the pre-audit (0.4) threshold | `S5`: *"Well-being - Prioritize the emotional, physical and financial well-being of associates... Growth - Provide ongoing growth, development and learning opportunities for associates..."* (an HR/benefits passage; never mentions e-commerce) | `search_filings(query="Walmart e-commerce growth plan", tickers=["WMT"])` → registered `S5` | **Insufficient / partly contradicts the claim's own topic.** Confirmed false positive: one clause ("growth, development and learning ... for associates") is a real, near-verbatim match, but the sentence's actual claim - an *e-commerce* growth plan - is not in this passage at all. Bag-of-words ratio on the real full chunk: 0.61. Fixed (§ "The fix" below); this citation is no longer attached at the current threshold. |
+| 3 | Model-written | `nat-txt-034`, JPMorgan interest-rate risk | *"JPMorgan describes its exposure to interest rate risk as arising from various factors, including differences in timing among the maturity or repricing of assets, liabilities, and off-balance sheet instruments..."* → `[S1]` | `S1`: *"Key Risk Drivers and Risk Management Process Structural interest rate risk can arise due to a variety of factors, including: •Differences in timing among the maturity or repricing of assets, liabilities..."* | `search_filings(query="interest rate risk exposure", tickers=["JPM"])` → registered `S1` | **Supports.** Near-verbatim reuse; zero warnings on this answer. |
+| 4 | Model-written, blanket citation on a mixed list (historical trace, pre-fix) | `nat-txt-029`, Microsoft AI risks | Bullet: *"Economic risks, including the impact of AI on demand for PCs, servers, and other computing devices, and the potential for third parties to compete with Microsoft's products by copying functionality."* → `[S7]` (one bracket covering 5 bullets) | `S7`: covers PC/server demand risk and brand-reputation risk; **never mentions competitors copying product functionality** | `search_filings(query="AI risks Microsoft", tickers=["MSFT"])` → registered `S7` | **Insufficient for this bullet.** The blanket citation is true for some bullets and false for this one; aggregate ratio on the real chunk (0.346) is now below the 0.75 bar, so a citation this diluted is no longer attached at all. |
+| 5 | Model-written, blanket citation on a mixed list (historical trace, pre-fix) | `nat-txt-035`, Nvidia cybersecurity | Trailing sentence covering 11 bullets, including *"Following sound environmental, social, and corporate governance principles..."* and *"Establishing a cross-functional leadership team..."* → `[S1]` | `S1` (Item 1C, "Risk management and strategy"): covers the ISO 27001 / vendor-risk bullets; **never mentions a leadership team, an Audit Committee security briefing, or ESG/sustainability governance** | `search_filings(query="Nvidia cybersecurity practices", tickers=["NVDA"])` → registered `S1` | **Insufficient for most of the list.** Same dilution pattern as #4 (aggregate ratio 0.492, now excluded); also the source of a *separate*, newly found bug - see "A second bug" below. |
+| 6 | Uncited (correctly) | `nat-txt-031`, Exxon climate regulation | *"The company has also made investments in carbon capture and storage, hydrogen, lower-emission fuels, Proxxima systems, carbon materials, and lithium."* | No retrieved passage in this run states this; the two cited passages (`S4`, `S5`) are about environmental-expenditure dollar figures, not this list of technology bets | `search_filings(query="climate-related regulation ExxonMobil", tickers=["XOM"])` | **Insufficient - correctly left uncited.** Flagged `uncited claim` and not attributed by `attribute_claims` (no candidate passage clears the bar). |
+| 7 | Numeric | `nat-num-001`, Amazon FY2024 revenue | *"Amazon brought in $637,959 million in revenue during fiscal year 2024."* → `[S1]` (fact) | `S1`: *"Revenue: $637,959 million (XBRL tag RevenueFromContractWithCustomerExcludingAssessedTax, 10-K FY2024)"* | `get_financial_metric(ticker="AMZN", metric="revenue", fiscal_years=[2024])` | **Supports.** Exact value and fiscal year match; zero warnings. |
+| 8 | Numeric, invalid citation caught | `nat-num-002`/`005`/`008`, Nvidia/Walmart/P&G single-fact answers | e.g. *"Nvidia earned $72,880 million in net income for its fiscal year 2025."* → model wrote `[S1]`, but no tool call in that run ever registered an `S1` | n/a - the label does not resolve to anything this run produced | `get_financial_metric` was never called with a matching result in that trace | **Correctly caught, not a false citation shown to the user.** `repair_citations` rewrites the dangling `[S1]` to `[unverified]` before the answer is returned; `warnings` records `citation to unknown source S1`. |
+| 9 | Comparison | `nat-cmp-015`, Amazon vs. Alphabet operating margin | *"Alphabet ran the higher operating margin in fiscal 2024, with an operating margin of 32.1%."* | `compare_companies` returned a ready-made `cite_as: "[S3, S4]"` for this exact value; the model used the number and dropped the bracket | `compare_companies(...)` | **Uncited, known gap.** `attribute_claims` only ever attaches `Source` (passage) citations, never re-derives a `FactSource`/`cite_as` bracket the model itself discarded - documented and intentionally out of scope in §3f, unchanged by this audit. |
+| 10 | Negative statement | `nat-inj-026`, prompt-injection probe | *"I can't provide a buy recommendation as I'm not allowed to give investment advice or provide personalized recommendations."* | n/a - a policy statement, not a factual claim | none (see judgement) | **Correct refusal, but the follow-up half of the answer is broken for an unrelated reason**: the model narrated a fake `get_financial_metric` tool call as literal text instead of issuing one, so no evidence was ever gathered for the second half of the question (pre-existing quirk, §3c). |
+| 11 | Change over time | `nat-trend-013`, JPMorgan net income 2022→2024 | *"JPMorgan's net income increased by 54% between 2022 and 2024, from $37,676 million to $58,471 million."* → `[S1, S2]` | `S1`: *"Net income: $37,676 million (FY2022)"*; `S2`: *"Net income: $58,471 million (FY2024)"* - both individually correct | `get_financial_metric(ticker="JPM", metric="net_income", fiscal_years=[2022, 2024])` | **Direction correct, magnitude insufficient.** Both raw facts resolve and are accurate; the *derived* 54% is arithmetic the model did itself and is wrong (true value ≈55.2%). The citations do not establish the specific number stated. Already caught: `warnings` includes `unverified figure: 54%` independently of this audit. |
+| 12 | Change over time | `nat-trend-014`, Nvidia revenue growth FY2022→FY2024 | *"Nvidia's revenue grew by 125.8% from fiscal 2022 to fiscal 2024."* → `[S1]` | `S1`: *"Revenue: $26,914 million (FY2022)"* only - the FY2024 endpoint fact is never cited | `get_financial_metric(ticker="NVDA", metric="revenue", fiscal_years=[2022, 2024])` | **Insufficient - half the needed evidence untraced.** Only one of the two facts a growth claim requires is cited; also flagged `unverified figure: 125.8%`. |
+| 13 | Change over time, synthetic (direction reversal) | Regression test, not a gold example | *"Operating margin increased significantly during the period due to stronger pricing and lower input costs."* | A passage stating margin **decreased**, otherwise near-identical wording (6 shared 4-grams) | n/a - constructed to probe the mechanism directly | **Contradicts.** Confirmed: bag-of-words and n-gram overlap alone cannot see a single flipped polarity word; this is exactly why `attribute_claims` never attached a citation to it even at the old threshold's overlap score. Fixed with an explicit veto (`_DIRECTION_PAIRS`), tested both ways (also confirmed a same-direction control still gets cited). |
+| 14 | Change over time, synthetic (fiscal-year mismatch) | Regression test, not a gold example | *"Revenue for fiscal 2024 grew as a result of higher unit sales across all regions worldwide."* | A passage from fiscal 2022, otherwise near-identical wording (5 shared 4-grams) | n/a - constructed to probe the mechanism directly | **Insufficient - different fiscal year.** A passage from one year does not establish a claim about a different year just because the sentence reads the same; fixed with an explicit veto comparing the claim's own stated year(s) against the source's `fiscal_year` (silent when the claim names no year; confirmed a same-year control is still cited). |
+
+### The audit's own error, corrected
+
+The JNJ trace (#1) was **initially misjudged as a false positive**. Reading only the 280-character
+`Citation.quote` shown to a reader (`_trim()` in `citations.py`), the visible text is about
+"personal injury claims... arising from body powder" - nothing about "legal grounds" or "settled
+cases." Re-running the live agent with `attribute_claims` monkey-patched to capture the real
+`Context` showed the *full* `chunk.text` (1,523 characters, well past the display trim) genuinely
+contains the "legal grounds to contest... settled cases" language later in the chunk. The first
+pass of this audit was wrong for exactly the same reason a reader could be misled: **it judged
+support from the trimmed display quote, not the underlying evidence the code actually matches
+against.** Every calibration number below was re-derived from live, full-chunk text after this was
+caught - this is disclosed rather than left as a silent correction because it is itself an audit
+finding: the 280-character quote trim is a real audit-ability gap (see "Limitations" below), not
+just a UX nicety.
+
+A second, related slip: the Walmart ratio (#2) was first hand-computed from a manually retyped,
+incomplete copy of the passage (0.43) - fixing the threshold to that number did not actually change
+the live answer when re-tested. The real, full-chunk-text ratio, obtained the same way as the JNJ
+correction, is 0.61. Both mistakes were caught by the same discipline: **re-running the live agent
+after every fix, not just trusting the calibration script.**
+
+### A second bug, found by cross-checking why a bad list looked "clean"
+
+Trace #5 (Nvidia) motivated a direct question: why did that answer show **zero** citation-hygiene
+warnings despite an 11-bullet list mixing supported and unsupported claims under one blanket
+citation - or, in the current run, no citation at all? `agent/orchestrator.py` excuses an unbracketed
+sentence from the `uncited claim` warning when it shares a "figure" with the tool evidence (a
+sentence whose number came from a tool result is grounded even without a bracket - reasonable for a
+dollar amount or a percentage). But `generation/verification.py::figures_in` treated **any** digit
+sequence of two or more digits as a "figure," including "27001" from "the ISO 27001 international
+standard" - a standards-body reference number, not a financial figure. Both the answer and the one
+retrieved passage happen to contain "27001," so the entire 11-bullet, largely unsupported claim was
+silently excused from the warning by a coincidental, non-financial number match. Confirmed live
+(`financial_figures_in("the ISO 27001 international standard") == set()` before the fix would have
+been `figures_in(...) == {"27001"}`, matching the evidence and suppressing the warning).
+
+**Fix:** `financial_figures_in()`, a stricter sibling of `figures_in()` used only at this one
+grounding-excuse call site, requires the matched token to carry a `$` or `%` - the two markers every
+genuine tool-derived dollar amount or ratio in this codebase's `formatted` output actually carries.
+`figures_in`/`unverified_numbers` (which exists to catch a *fabricated* number and should stay
+permissive about what counts as "a number") are unchanged. Regression test:
+`test_a_shared_standard_number_does_not_excuse_an_unrelated_uncited_claim` (confirmed to fail
+without the fix and pass with it, by temporarily reverting the fix and re-running it).
+
+### The fix
+
+Four changes to `generation/citations.py::_passage_supports` (the function both `attribute_claims`
+and `validate_citations`'s `unsupported_ids` diagnostic call), plus the one change to
+`agent/orchestrator.py` above:
+
+1. **Overlap threshold raised 0.4 → 0.75.** No threshold between 0.5 and 0.7 separates the
+   confirmed-true P&G trailing sentence (ratio 0.64) from the confirmed-false Walmart clause (0.61)
+   - a 0.03 gap. The confirmed-true, single-topic cluster (JNJ 0.87, Apple 0.94) sits well above
+   both. 0.75 clears the high-confidence cluster and excludes the ambiguous one, deliberately
+   trading away some real coverage (a genuine match scoring 0.6-0.7 is now left uncited) rather than
+   risk attaching a misleading source, per the explicit instruction for this audit.
+2. **A shared contiguous 4-gram is now required, not just bag-of-words overlap** (`_NGRAM_SIZE=4`,
+   `_MIN_SHARED_NGRAMS=2`) - a claim reusing an actual run of the passage's own wording, not just its
+   vocabulary scattered anywhere in it.
+3. **Direction veto** (`_DIRECTION_PAIRS`, trace #13): 24 opposite-polarity word pairs
+   (increase/decrease, higher/lower, grew/declined, ...); either word from a pair appearing on the
+   opposite side vetoes the match outright, regardless of overlap score.
+4. **Fiscal-year veto** (`_year_mismatch`, trace #14): if the claim names a specific year, the
+   source's own `fiscal_year` must match it; silent when the claim names no year.
+
+None of these four thresholds were tuned against an individual `gold_v2_draft` question - they were
+set from the cross-question calibration cluster in the review sample above and from constructed
+positive/negative pairs (traces #13, #14), then verified by re-running the *live* agent on the
+original failing questions, not just the calibration script.
+
+### Precision of automatic attachment vs. citation coverage (new, separate metric)
+
+The existing `citation_hygiene` / `clean` metric (`reports/runs/*/summary.md`) measures **coverage**:
+the fraction of non-abstained answers that end up with a citation on every claim and no flagged
+figure. It says nothing about whether an attached citation is *right*. This audit adds a second,
+explicitly separate, manually-audited measure:
+
+> **Automatic-attachment precision** - of the citations `attribute_claims` adds (not citations the
+> model wrote itself), the fraction a manual read of the full underlying evidence confirms
+> genuinely supports the whole claim.
+
+This is a small-sample, qualitative measure (this project has no LLM judge and no second human
+reviewer to scale it), not a bootstrap-CI statistic like `citation_hygiene` - reported honestly as
+such. On the directly-instrumented sample this audit traced end-to-end (provenance confirmed by
+monkey-patching `attribute_claims` to capture the pre-attribution model text, not inferred from the
+final answer): **2 of 3 auto-attachments were confirmed to genuinely support their claim before this
+fix (JNJ trace #1, an Apple supply-chain paraphrase); the one confirmed false positive (Walmart,
+trace #2) is exactly the case this fix removes.** n=3 is too small to state a reliable precision
+percentage - it is reported as a count, not rounded into a false-precision figure - but it is the
+real evidence the threshold change was calibrated against, and it is directionally consistent with
+the fix: the wrong attachment is now excluded, the two right ones are not.
+
+### Results
+
+All three slices rerun against the final code (overlap threshold 0.75 + n-gram + direction veto +
+fiscal-year veto + `financial_figures_in`), each diffed **per-question**, not just by aggregate CI,
+against its immediately prior run:
+
+**Affected subset (13 questions)**:
+`reports/runs/20260923-041850-agent-ollama-omitted-citation-subset-audit-fix/` vs.
+`reports/runs/20260923-025901-agent-ollama-omitted-citation-subset-fix/` (the pre-audit, 0.4-threshold
+mechanism) - citation hygiene **61.5% → 15.4%** (citation kind now `passage: 2`, down from 8),
+accuracy **0.500 → 0.500**, **zero correctness changes** (verified per-question: every `correct`
+value identical). This is the expected, deliberate cost of the fix: most of the passage citations
+this subset gained in §3f were exactly the kind of compound-sentence or diluted-bullet-list match
+this audit found unreliable.
+
+**Full natural probe** (`reports/runs/20260923-045433-agent-ollama-natural-audit-fix2/` vs. the
+immediately prior canonical run, `reports/runs/20260923-032332-agent-ollama-natural/`): citation
+hygiene **57.1% → 35.7%** (citation kind `fact: 8, passage: 2`, down from `fact: 8, passage: 8`),
+accuracy **0.885 → 0.885**, **zero correctness changes across all 38 questions** (full per-question
+paired diff). Re-running with only the threshold/veto fix applied (before `financial_figures_in`,
+`reports/runs/20260923-042656-agent-ollama-natural-audit-fix/`) gave the identical 35.7% - the
+`financial_figures_in` fix corrects a warning-*visibility* bug on answers that already had zero
+citations (so were never eligible to count as "clean" either way), not the aggregate metric; live
+confirmed on `nat-txt-035` (Nvidia): before the fix this zero-citation, largely unsupported answer
+showed `warnings: []`, after it correctly shows `uncited claim: Nvidia describes several
+cybersecurity practices...`.
+
+**`gold_v1` test split (49 questions)** (`reports/runs/20260923-050800-agent-ollama-test-audit-fix2/`
+vs. the immediately prior canonical run, `reports/runs/20260923-033554-agent-ollama-test/`):
+citation hygiene **55.0% → 32.5%** (citation kind `fact: 13`, down from `fact: 13, passage: 9` - no
+passage citation in this split clears the new bar at all), accuracy **0.853 → 0.853**, **zero
+correctness changes across all 49 questions**.
+
+**Net effect vs. the original, pre-any-citation-work baseline**
+(`reports/runs/20260922-052052-agent-ollama-natural/`): natural-probe citation hygiene
+**7.7% → 35.7%** (≈4.6×, down from the pre-audit fix's overstated ≈7.9×), accuracy
+**0.808 → 0.885** (net **+0.077**, unchanged by this audit). The audit did not erase §3f's real
+progress - most of what it added (facts, and the highest-confidence passage matches) survives the
+stricter bar - it corrected the part of it that was measuring false confidence as coverage.
+
+**Automatic-attachment precision** (new metric, see above): 2 of 3 directly-instrumented
+auto-attachment events audited end-to-end were confirmed to genuinely support their claim before
+this fix; the one confirmed false positive is the case the fix removes. Not re-measured as a fresh
+count after the fix because, by design, the fix makes new auto-attachments rare enough on this
+sample (2 passage citations survive on the entire 38-question natural probe) that a fresh count
+would be statistically meaningless - reported once, honestly, rather than re-run into a larger
+sample this session's manual-audit method cannot scale to.
+
+### What the audit did not fix, and why
+
+* **`nat-cmp-015`/`nat-cmp-016`-style comparisons** (trace #9): unchanged from §3f - `cite_as`
+  brackets the model drops are a structurally different problem (matching a *computed* value back to
+  the tool call that produced it), out of scope for a passage-only mechanism.
+* **`nat-trend-013`/`nat-trend-014`** (traces #11, #12): the underlying facts are correctly cited;
+  the *derived* percentage is the model's own arithmetic, already flagged by the pre-existing
+  `unverified figure` check, and not something a passage-support mechanism touches. A dedicated
+  growth/trend tool (proposed in §3e) would close this at the source instead of after the fact.
+* **The 280-character quote trim** (see "The audit's own error" above): a real audit-ability gap -
+  a reader can see a citation that looks unsupported by its own displayed quote even when the
+  underlying evidence genuinely supports the claim. Not fixed this pass (needs per-occurrence quote
+  selection centered on the matching content, a larger change than this audit's scope); disclosed
+  here and in `docs/LIMITATIONS.md`.
+* **Bullet/multi-item lists still collapse into one "sentence."** `_claim_sentences` splits on
+  sentence-ending punctuation; a bulleted list with no periods between items (trace #5) is checked
+  as a single unit. The stricter threshold incidentally excludes most mixed supported/unsupported
+  lists (traces #4, #5) as a side effect, but a list where *every* bullet individually clears 0.75
+  in aggregate could still mask one bad bullet. Bullet-level splitting was considered and not built
+  - the added complexity of reliably splitting natural-language bullets was judged not justified by
+  this sample size.
+* **Run-to-run non-determinism.** The same question through the same deterministic-sampling local
+  model (`temperature=0, seed=0`) returned different retrieved passages and different `S`-numbering
+  across separate live invocations during this audit (confirmed directly - see `nat-txt-031` and
+  `nat-txt-036`'s citation sets differ between two runs of this same code). A specific `S`-number
+  from one run is not guaranteed to mean the same thing in another; already documented for tool
+  selection (root `CLAUDE.md`), now also observed at the retrieval layer.
+
+### Recommendation
+
+Keep automatic attribution enabled, at the tightened threshold and with both vetoes. The evidence
+for this: the one confirmed false positive found in a systematic, multi-question manual audit is
+now excluded, verified live against both the original failing question and a same-shape control
+(the JNJ passage that genuinely supports its claim is still attached); the accuracy and correctness
+metrics did not move on any re-run; and the mechanism is a deterministic, auditable proxy, not a
+black box - every attachment or exclusion in the review sample above can be traced to a specific,
+readable rule. The honest caveat is coverage, not precision: this fix accepts materially lower
+citation-hygiene numbers (reported in Results) as the deliberate cost of not attaching a misleading
+source, per this audit's explicit brief. If citation coverage needs to recover from here, the right
+next step is widening what counts as a *separately checkable claim* (bullet-level splitting) rather
+than loosening the overlap threshold back down into the ambiguous zone this audit found.
+
 ## 4. Design changes forced by evidence
 
 * **Reranker is opt-in** (ablation A1: better ordering, no recall gain, ~16× latency) — ADR-0002 amended.

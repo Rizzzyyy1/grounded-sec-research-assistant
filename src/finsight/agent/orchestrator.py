@@ -36,7 +36,7 @@ from finsight.generation.context import Source
 from finsight.generation.guardrails import is_out_of_scope
 from finsight.generation.llm import LLMClient, ToolUse
 from finsight.generation.prompts import ABSTAIN_TOKEN, DECLINE_ADVICE, NO_EVIDENCE
-from finsight.generation.verification import figures_in, unverified_numbers
+from finsight.generation.verification import financial_figures_in, unverified_numbers
 
 log = get_logger(__name__)
 AGENT_PROMPT_VERSION = "agent-v1"
@@ -149,8 +149,10 @@ class ResearchAgent:
         # A sentence whose figures come from a tool result is grounded by that call even without a
         # bracket (the prompt says so); only sentences with neither a label nor a tool figure are
         # genuinely uncited.
-        tool_figures = figures_in(" ".join(evidence))
-        uncited = [x for x in report.uncited_sentences if not (figures_in(x) & tool_figures)]
+        tool_figures = financial_figures_in(" ".join(evidence))
+        uncited = [
+            x for x in report.uncited_sentences if not (financial_figures_in(x) & tool_figures)
+        ]
         warnings = (
             *(f"citation to unknown source {label}" for label in report.invalid_ids),
             *(f"uncited claim: {x[:90]}" for x in uncited),

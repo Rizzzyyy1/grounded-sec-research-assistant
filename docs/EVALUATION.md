@@ -203,6 +203,21 @@ the case directly. `CitationHygiene.citation_kinds` (also diagnostic, also outsi
 whether a clean answer's citation was a `fact`, a `passage`, or both, so a future report can tell
 which kind of grounding actually improved rather than reading one aggregate rate.
 
+**Citation hygiene measures coverage, not correctness - a manual audit is what checks the
+latter.** `attribute_claims`'s lexical-overlap check is a proxy for support, not an entailment
+judgement, so before trusting the hygiene numbers above a manual audit read every kind of citation
+this system produces against the *full* underlying evidence and judged support / contradiction /
+insufficiency by hand (ERROR_ANALYSIS.md 3g). It found one confirmed false attribution (a compound
+sentence where only one clause was genuinely sourced) and, separately, a bug that let an entirely
+unsupported multi-claim answer report zero warnings (a coincidental non-financial number match).
+Both are fixed; citation hygiene fell as a direct, deliberate consequence (below) because the fix
+trades coverage for precision, per the audit's brief to prefer an uncited claim over a misleading
+source. The audit also introduces **automatic-attachment precision** - of the citations
+`attribute_claims` adds (not ones the model wrote itself), the fraction a manual read confirms
+genuinely supports the whole claim - as an explicitly separate, small-sample, qualitative measure
+from `citation_hygiene`'s bootstrap-CI statistic; see ERROR_ANALYSIS.md 3g for the count and why it
+is reported as a count rather than a rounded percentage.
+
 ### 3.3 System
 
 Latency p50 / p95 (end-to-end and per stage), input/output/cached tokens, **cost per query**, and

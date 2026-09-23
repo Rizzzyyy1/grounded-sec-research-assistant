@@ -198,6 +198,13 @@ all headline numbers reproducible via one documented command.
    instead of a tool doing it (one instance observed arithmetically wrong);
    (d) re-measure `gold_v1` dev citation hygiene against all three fixes - test is now re-measured
    (0.0% → 55.0%), dev is not; see `scripts/collect_results.py`'s "Citation hygiene" caveat.
+   ~~Audit `attribute_claims` for false attribution~~ **Done**: a manual review sample (auto-attached,
+   model-written, uncited, numeric, comparison, negative, and trend claims, each read against the
+   full underlying evidence, not the trimmed display quote) found one confirmed false attribution
+   and one separate warning-suppression bug; both fixed and tested against supporting and
+   contradicting cases (ERROR_ANALYSIS.md 3g). Citation hygiene fell as the deliberate, expected
+   cost of the fix - reported alongside the new, explicitly separate "automatic-attachment
+   precision" measure, not folded into the existing metric.
 
 ## Stretch ideas
 

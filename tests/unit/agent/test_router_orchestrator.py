@@ -9,10 +9,20 @@ import pytest
 from finsight.agent.orchestrator import AGENT_PROMPT_VERSION, AGENT_SYSTEM, ResearchAgent
 from finsight.agent.router import ToolRouterAgent
 from finsight.agent.tools import AgentContext
-from finsight.config.settings import LLMSettings
+from finsight.config.settings import LLMSettings, RetrievalSettings
 from finsight.core.schemas import Answer, QueryType, Usage
 from finsight.generation.llm import LLMResult, ToolUse
 from finsight.generation.prompts import DECLINE_ADVICE
+from finsight.indexing.embeddings import HashingEmbedder
+from finsight.indexing.sparse_index import SparseIndex
+from finsight.indexing.vector_store import InMemoryVectorStore
+from finsight.ingestion.xbrl.store import FactStore
+from finsight.retrieval.dense import DenseRetriever
+from finsight.retrieval.query_analysis import QueryAnalyzer
+from finsight.retrieval.retriever import Retriever
+from finsight.retrieval.sparse import SparseRetriever
+
+from tests.unit.conftest import ChunkFactory  # isort: skip
 
 pytestmark = pytest.mark.unit
 
@@ -233,3 +243,49 @@ def test_labels_do_not_leak_between_runs(ctx: AgentContext) -> None:
 def test_empty_model_reply_is_treated_as_no_answer(ctx: AgentContext) -> None:
     a = agent(ctx, ScriptedAgentLLM(turn(""))).answer("What was Apple's revenue in fiscal 2024?")
     assert a.abstained
+
+
+# ------------------------------------------------------------------ audit-driven fix (3g):
+# a shared non-financial number must not silently excuse an unbracketed claim (nat-txt-035)
+
+
+@pytest.fixture
+def ctx_with_standard_reference(make_chunk: ChunkFactory, universe: Any) -> AgentContext:
+    passage = make_chunk(
+        "We follow the ISO 27001 international standard for Information Security and "
+        "consult external cybersecurity firms on risk management and strategy.",
+        ticker="AAPL", year=2024, item="1C",
+    )  # fmt: skip
+    emb, vec, sparse = HashingEmbedder(512), InMemoryVectorStore(), SparseIndex()
+    vec.upsert([passage], emb.embed_documents([passage.indexed_text]))
+    sparse.build([passage])
+    retriever = Retriever(
+        {passage.id: passage}, RetrievalSettings(rerank=False, final_k=4),
+        dense=DenseRetriever(emb, vec), sparse=SparseRetriever(sparse),
+        analyzer=QueryAnalyzer(universe),
+    )  # fmt: skip
+    return AgentContext(facts=FactStore(), retriever=retriever, universe=universe)
+
+
+def test_a_shared_standard_number_does_not_excuse_an_unrelated_uncited_claim(
+    ctx_with_standard_reference: AgentContext,
+) -> None:
+    """Regression for the nat-txt-035 audit finding: the model's answer names "ISO 27001" (which
+    the retrieved passage also contains) but bolts on a claim the passage never supports, with no
+    bracket anywhere. Before the fix, `figures_in` treated the shared "27001" as a grounding figure
+    and silently excused the whole sentence from the uncited-claim check."""
+    llm = ScriptedAgentLLM(
+        turn(
+            "",
+            ToolUse("t1", "search_filings", {"query": "cybersecurity practices", "tickers": ["AAPL"]}),
+        ),
+        turn(
+            "The company follows the ISO 27001 standard, and also runs a dedicated board-level "
+            "sustainability committee that audits supplier labor conditions worldwide."
+        ),
+    )  # fmt: skip
+    a = agent(ctx_with_standard_reference, llm).answer(
+        "What cybersecurity practices are described?"
+    )
+    assert a.citations == ()
+    assert any("uncited claim" in w for w in a.warnings)

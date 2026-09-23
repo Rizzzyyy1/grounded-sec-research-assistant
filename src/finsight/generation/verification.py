@@ -47,6 +47,25 @@ def figures_in(text: str) -> set[str]:
     }
 
 
+def financial_figures_in(text: str) -> set[str]:
+    """Like :func:`figures_in`, but only the subset that *looks like* a dollar amount or a
+    percentage (the raw token carries ``$`` or ``%``) - a plain integer such as a standard number
+    ("ISO 27001") or a section reference is excluded even though :func:`normalise` would accept it
+    as a checkable value. Used specifically to decide whether an uncited sentence is "grounded" by
+    a shared figure: a coincidental match on a non-financial number must not excuse an entire
+    unbracketed claim from the citation-hygiene check (found auditing `nat-txt-035`, ERROR_ANALYSIS
+    3g - "ISO 27001" appearing in both a multi-bullet answer and its one retrieved passage silently
+    suppressed the "uncited claim" warning for bullets the passage never actually supports).
+    :func:`figures_in` itself stays unchanged for :func:`unverified_numbers`, which deliberately
+    treats any digit sequence as checkable - it exists to catch a fabricated number, so being
+    permissive about what counts as "a number" is the correct direction to err in there."""
+    return {
+        n
+        for t in _NUMBER.findall(_IDENTIFIER.sub(" ", text))
+        if ("$" in t or "%" in t) and (n := normalise(t)) is not None
+    }
+
+
 def unverified_numbers(answer: str, evidence: Iterable[str]) -> list[str]:
     """Figures stated in ``answer`` that occur in none of the ``evidence`` texts."""
     known: set[str] = set()

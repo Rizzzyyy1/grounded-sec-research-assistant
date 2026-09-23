@@ -315,7 +315,7 @@ def fact_source(sid: str = "S1", *, ticker: str = "AAPL", year: int = 2024) -> F
 def test_support_ratio_separates_a_genuine_paraphrase_from_an_ungrounded_claim() -> None:
     supported = support_ratio(_SUPPLY_CHAIN_CLAIM, _SUPPLY_CHAIN_PASSAGE)
     unsupported = support_ratio(_UNSUPPORTED_CLAIM, _UNRELATED_PASSAGE)
-    assert supported >= 0.5  # matches the 0.53-1.00 range observed on real traces
+    assert supported >= 0.75  # matches the 0.87-0.94 range observed on real single-topic traces
     assert unsupported == 0.0
 
 
@@ -429,3 +429,104 @@ def test_a_fact_citation_is_never_judged_for_support() -> None:
     answer = "Something about the weather in a distant unrelated place entirely. [S1]"
     report = validate_citations(answer, ctx)
     assert report.unsupported_ids == ()
+
+
+# ------------------------------------------------------------------ audit-driven fixes (3g)
+# A live audit (reading the *full* underlying passage a real citation resolved to, not the
+# trimmed display quote) found a confirmed false attachment: a compound answer sentence mixed a
+# genuinely sourced clause (employee benefits) with an unsourced one (a different business topic
+# that happened to reuse the word "growth" in a different sense). The passage genuinely supported
+# HALF the sentence, which was enough to clear the original threshold on the whole sentence.
+# Reproduced here with synthetic content on the same structure, not the original question/answer.
+_COMPOUND_CLAIM = (
+    "The company's plan for expanding into new international markets includes launching a "
+    "regional logistics network, and separately continues offering ongoing training and career "
+    "development opportunities for employees as part of its long-standing workforce programs."
+)
+_PARTIALLY_MATCHING_PASSAGE = (
+    "Workforce Development - The Company continues offering ongoing training and career "
+    "development opportunities for employees as part of its long-standing workforce programs, "
+    "including tuition assistance and mentorship."
+)
+
+
+def test_a_compound_sentence_with_only_one_sourced_clause_is_not_attributed(
+    make_chunk: ChunkFactory,
+) -> None:
+    """The confirmed real failure mode: a passage that only supports HALF a compound sentence
+    (here, the workforce-development clause) must not be attached to the sentence as a whole -
+    that would misrepresent the *other* clause (international expansion) as sourced too, when
+    nothing in this run's context supports it at all."""
+    passage = make_chunk(_PARTIALLY_MATCHING_PASSAGE, ticker="AAPL", year=2024, item="1A")
+    ctx = build_context([rc(passage)], budget_tokens=9_999)
+    text, report = attribute_claims(_COMPOUND_CLAIM, ctx)
+    assert text == _COMPOUND_CLAIM  # unchanged - not attributed
+    assert report.citations == ()
+    assert report.uncited_sentences == (_COMPOUND_CLAIM,)
+
+
+def test_a_compound_sentence_is_flagged_unsupported_even_when_the_model_cited_it_itself(
+    make_chunk: ChunkFactory,
+) -> None:
+    """The same partial-match problem, checked the other way: if the model had written the
+    citation itself, it must be caught by the resolves-vs-supports diagnostic too, not just
+    skipped because a label happens to be present."""
+    passage = make_chunk(_PARTIALLY_MATCHING_PASSAGE, ticker="AAPL", year=2024, item="1A")
+    ctx = build_context([rc(passage)], budget_tokens=9_999)
+    answer = _COMPOUND_CLAIM.rstrip(".") + ". [S1]"
+    report = validate_citations(answer, ctx)
+    assert report.invalid_ids == ()  # S1 is a real source
+    assert report.unsupported_ids == ("S1",)  # ... that does not support the whole sentence
+
+
+_UP = "Operating margin increased significantly during the period due to stronger pricing and lower input costs."
+_DOWN_PASSAGE = (
+    "Operating margin decreased significantly during the period due to stronger pricing and "
+    "lower input costs, reflecting a one-time accounting adjustment."
+)
+
+
+def test_reversed_direction_is_never_attributed_despite_high_word_overlap(
+    make_chunk: ChunkFactory,
+) -> None:
+    """ "Increased" vs "decreased" is nearly invisible to word/n-gram overlap - the two sentences
+    share almost every other word. A direction word in the claim whose opposite appears in the
+    passage must veto the match outright, regardless of how high the overlap score is."""
+    passage = make_chunk(_DOWN_PASSAGE, ticker="AAPL", year=2024, item="7")
+    ctx = build_context([rc(passage)], budget_tokens=9_999)
+    text, report = attribute_claims(_UP, ctx)
+    assert text == _UP
+    assert report.citations == ()
+
+
+_FY2024_CLAIM = (
+    "Revenue for fiscal 2024 grew as a result of higher unit sales across all regions worldwide."
+)
+_FY2022_PASSAGE = "Revenue for fiscal 2022 grew as a result of higher unit sales across all regions worldwide, driven by strong demand."
+
+
+def test_a_passage_from_a_different_fiscal_year_is_never_attributed(
+    make_chunk: ChunkFactory,
+) -> None:
+    """A passage about FY2022 does not establish a claim about FY2024 just because the rest of
+    the sentence reads identically - the source's own chunk metadata year is checked against any
+    year the claim names, not inferred from wording alone."""
+    passage = make_chunk(_FY2022_PASSAGE, ticker="AAPL", year=2022, item="7")
+    ctx = build_context([rc(passage)], budget_tokens=9_999)
+    text, report = attribute_claims(_FY2024_CLAIM, ctx)
+    assert text == _FY2024_CLAIM
+    assert report.citations == ()
+
+
+def test_the_same_passage_is_attributed_when_the_claims_year_actually_matches(
+    make_chunk: ChunkFactory,
+) -> None:
+    """Control for the year-mismatch test above: the identical passage/claim pair, but naming
+    the year the source was actually filed for, is attributed normally - the check only vetoes a
+    genuine mismatch, it does not block every year-bearing claim."""
+    claim = "Revenue for fiscal 2022 grew as a result of higher unit sales across all regions worldwide."
+    passage = make_chunk(_FY2022_PASSAGE, ticker="AAPL", year=2022, item="7")
+    ctx = build_context([rc(passage)], budget_tokens=9_999)
+    text, report = attribute_claims(claim, ctx)
+    assert text != claim and "[S1]" in text
+    assert len(report.citations) == 1

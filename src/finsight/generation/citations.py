@@ -47,15 +47,48 @@ _SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z$\d]|\[(?!S\d))")
 _QUOTE_CHARS = 280
 _MIN_WORDS_FOR_CLAIM = 6
 UNVERIFIED_MARKER = "[unverified]"
-# Calibrated against real traces (ERROR_ANALYSIS.md 3f): a genuine paraphrase of a 10-K passage
-# shared 53-100% of its distinctive terms with that passage (8-16 shared terms); an answer drawn
-# from the model's own training-data familiarity, not the retrieved text, shared none with any
-# retrieved passage. This is a deterministic, explainable proxy for support - not a semantic
-# entailment judgement, and no LLM judge is used here (matching this project's zero-cost
-# evaluation philosophy) - so it is calibrated to be conservative: a real but loosely-worded
-# paraphrase may still miss it and stay flagged uncited, which is the safe direction to fail in.
+# Calibrated against real traces from a manual audit reading the *full* underlying passage text a
+# citation resolves to, not the trimmed display quote - the two can differ a lot on a long chunk,
+# and an earlier pass of this calibration was itself wrong for exactly that reason (ERROR_ANALYSIS
+# 3g). The audit found no threshold on this bag-of-words ratio cleanly separates two real classes
+# of answer: a genuine, single-topic paraphrase of a passage (observed 0.87-0.94) and a compound
+# sentence where only *one clause* is genuinely sourced but the sentence as a whole still shares
+# real vocabulary with an off-topic passage - confirmed live: a claim about "growing its
+# e-commerce business" that also happened to mention "ongoing growth ... for associates" was
+# attached to a passage that was entirely about employee benefits ("growth" as career
+# development, never e-commerce), because that one clause alone scored 0.61. A plausible, if
+# generic and boilerplate, single-clause match scored a close 0.64. Given no ratio reliably tells
+# these apart, the threshold is set above both (0.75) rather than between them - deliberately
+# trading away some real coverage (a real match that happens to score in the 0.6-0.7 range is
+# left uncited) for not attaching the confirmed-false one. This is a deterministic, explainable
+# proxy for support, not a semantic entailment judgement - no LLM judge is used here, matching
+# this project's zero-cost evaluation philosophy - and it stays calibrated conservative on
+# purpose: a real but loosely-worded or partly-unsourced claim may miss it and stay flagged
+# uncited, which is the safe direction to fail in, not the reverse. Compound, multi-topic
+# sentences remain a known, disclosed residual risk this ratio-based check cannot fully close -
+# see ERROR_ANALYSIS.md 3g's recommendation.
 _MIN_SHARED_TERMS = 4
-_MIN_OVERLAP_RATIO = 0.4
+_MIN_OVERLAP_RATIO = 0.75
+# A shared contiguous n-gram - the claim reusing an actual run of the passage's own wording, not
+# just its vocabulary scattered anywhere in it - is a stronger signal than bag-of-words overlap
+# alone and catches cases the ratio check admits on vocabulary alone (ERROR_ANALYSIS.md 3g).
+_NGRAM_SIZE = 4
+_MIN_SHARED_NGRAMS = 2
+# Neither bag-of-words nor n-gram overlap catches a claim that states the *opposite* of what the
+# passage says while reusing almost all of its wording ("revenue increased" vs "revenue
+# decreased") - confirmed by construction: such a pair still shares 6 four-grams. A word from the
+# claim whose paired opposite appears in the passage vetoes the match outright, regardless of how
+# high the overlap score is.
+_DIRECTION_PAIRS = (
+    ("increase", "decrease"), ("increased", "decreased"), ("increasing", "decreasing"),
+    ("increases", "decreases"), ("higher", "lower"), ("rose", "fell"), ("rising", "falling"),
+    ("grew", "declined"), ("growth", "decline"), ("grow", "shrink"), ("gain", "loss"),
+    ("gained", "lost"), ("gains", "losses"), ("up", "down"), ("above", "below"),
+    ("expanded", "contracted"), ("improved", "worsened"), ("stronger", "weaker"),
+    ("outperformed", "underperformed"), ("beat", "missed"), ("exceeded", "fell short of"),
+    ("more", "less"), ("profit", "loss"), ("profitable", "unprofitable"), ("record", "worst"),
+)  # fmt: skip
+_YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
 
 
 @dataclass(frozen=True)
@@ -118,12 +151,46 @@ def support_ratio(claim: str, passage_text: str) -> float:
     return len(shared) / len(claim_terms)
 
 
+def _ngrams(tokens: list[str], n: int) -> set[tuple[str, ...]]:
+    return {tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1)}
+
+
+def _opposite_direction_present(claim: str, passage_text: str) -> bool:
+    """True if the claim and passage use opposite directional/polarity words for what would
+    otherwise read as the same statement - see :data:`_DIRECTION_PAIRS`."""
+    claim_words = set(tokenize(claim))
+    passage_words = set(tokenize(passage_text))
+    return any(
+        (a in claim_words and b in passage_words) or (b in claim_words and a in passage_words)
+        for a, b in _DIRECTION_PAIRS
+    )
+
+
+def _year_mismatch(claim: str, source: Source) -> bool:
+    """True if the claim names a specific fiscal year that is not the source's own fiscal year -
+    a passage from FY2022 does not establish a claim about FY2024 just because the rest of the
+    sentence reads the same way. Silent (no mismatch) when the claim names no year at all."""
+    claim_years = {int(y) for y in _YEAR.findall(claim)}
+    return bool(claim_years) and source.chunk.metadata.fiscal_year not in claim_years
+
+
 def _passage_supports(claim: str, source: Source) -> bool:
-    claim_terms = set(tokenize(strip_labels(claim)))
+    stripped = strip_labels(claim)
+    claim_terms = set(tokenize(stripped))
     if len(claim_terms) < _MIN_SHARED_TERMS:
         return False
-    shared = claim_terms & set(tokenize(source.chunk.text))
-    return len(shared) >= _MIN_SHARED_TERMS and len(shared) / len(claim_terms) >= _MIN_OVERLAP_RATIO
+    passage_text = source.chunk.text
+    shared = claim_terms & set(tokenize(passage_text))
+    if len(shared) < _MIN_SHARED_TERMS or len(shared) / len(claim_terms) < _MIN_OVERLAP_RATIO:
+        return False
+    shared_ngrams = _ngrams(tokenize(stripped), _NGRAM_SIZE) & _ngrams(
+        tokenize(passage_text), _NGRAM_SIZE
+    )
+    if len(shared_ngrams) < _MIN_SHARED_NGRAMS:
+        return False
+    return not (
+        _opposite_direction_present(stripped, passage_text) or _year_mismatch(stripped, source)
+    )
 
 
 def _claim_sentences(answer: str) -> list[str]:

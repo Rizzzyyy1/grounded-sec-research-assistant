@@ -62,13 +62,13 @@ Accuracy by question type on the **test** split (exploratory: few questions per 
 
 ### Citation hygiene (answers with a valid citation and no flagged claim/figure)
 
-Accuracy alone hides this: a fluent answer can score correct on the numbers it states while citing nothing, or citing a source that does not exist. The router's text fallback and the free local agent both score far below the extractive baseline (which can only ever quote, so it is close to 100% by construction) - this is the more honest read of how "grounded" each system actually is, and it is not visible in the accuracy tables above. "Citing a source that does not exist" is still counted as a failure here either way, but it no longer reaches the reader looking like a real citation: any label the model writes that this run cannot back up is rewritten to `[unverified]` before the answer leaves the pipeline (`generation/citations.py::repair_citations`, ERROR_ANALYSIS.md row 26) - confirmed to leave these numbers unchanged by re-running the natural-phrasing probe after the fix. **The agent row's test column reflects three further fixes** (`agent/tools.py::_register_fact` giving XBRL facts a real citation; a `computed_metric` tool-selection fix; then `generation/citations.py::attribute_claims` giving a genuinely-paraphrased-but-unbracketed claim a real citation instead of leaving it uncited - ERROR_ANALYSIS.md 3d/3e/3f): test accuracy rose 0.735 -> 0.853 and citation hygiene 0.0% -> 55.0% with zero new regressions at any stage (paired per-question diff against the immediately prior run each time). **The dev column has not been re-measured against any of the three** - expect a comparable rise, not the value shown.
+Accuracy alone hides this: a fluent answer can score correct on the numbers it states while citing nothing, or citing a source that does not exist. The router's text fallback and the free local agent both score far below the extractive baseline (which can only ever quote, so it is close to 100% by construction) - this is the more honest read of how "grounded" each system actually is, and it is not visible in the accuracy tables above. "Citing a source that does not exist" is still counted as a failure here either way, but it no longer reaches the reader looking like a real citation: any label the model writes that this run cannot back up is rewritten to `[unverified]` before the answer leaves the pipeline (`generation/citations.py::repair_citations`, ERROR_ANALYSIS.md row 26) - confirmed to leave these numbers unchanged by re-running the natural-phrasing probe after the fix. **The agent row's test column reflects four further fixes** (`agent/tools.py::_register_fact` giving XBRL facts a real citation; a `computed_metric` tool-selection fix; `generation/citations.py::attribute_claims` giving a genuinely-paraphrased-but-unbracketed claim a real citation instead of leaving it uncited - ERROR_ANALYSIS.md 3d/3e/3f; then a manual audit of that mechanism against the full underlying evidence, which found and fixed one confirmed false attribution and a separate warning-suppression bug, tightening what counts as support - ERROR_ANALYSIS.md 3g): test accuracy rose 0.735 -> 0.853 and citation hygiene 0.0% -> 32.5% with zero new regressions at any stage (paired per-question diff against the immediately prior run each time, including the audit's own fix). The audit's fix traded coverage for precision by design - an earlier, unaudited pass of the fourth fix briefly reached 55.0% before the false-attribution risk it carried was found and closed. **The dev column has not been re-measured against any of the four** - expect a comparable rise, not the value shown.
 
 | System | dev | test |
 |---|---|---|
 | Single-shot RAG (extractive) | 96.6% | 100.0% |
 | Tool router | 36.8% | 38.6% |
-| Agent (llama3.2:3b via Ollama, free & local) | 4.2% | 55.0% |
+| Agent (llama3.2:3b via Ollama, free & local) | 4.2% | 32.5% |
 
 ### Retrieval (section-level; no LLM), default config = hybrid, rerank off
 
@@ -84,7 +84,7 @@ Model `llama3.2:3b` via Ollama (ADR-0011), `temperature=0`/`seed=0`, one Apple S
 
 | System | dev accuracy [95% CI] | test accuracy [95% CI] | abstention F1 (test) | p50 ms | $/query |
 |---|---|---|---|---|---|
-| Agent (llama3.2:3b via Ollama, free & local) | 0.768 [0.667, 0.870] | 0.853 [0.735, 0.971] | 0.88 | 11687 | $0 (free local model) |
+| Agent (llama3.2:3b via Ollama, free & local) | 0.768 [0.667, 0.870] | 0.853 [0.735, 0.971] | 0.88 | 14123 | $0 (free local model) |
 | Tool router (for reference, no LLM) | 0.942 [0.884, 0.986] | 0.941 [0.853, 1.000] | 0.83 | 86 | $0 (no LLM) |
 | Single-shot RAG (extractive, for reference, no LLM) | 0.275 [0.174, 0.377] | 0.206 [0.088, 0.353] | 0.83 | 613 | $0 (no LLM) |
 
