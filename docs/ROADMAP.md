@@ -178,18 +178,26 @@ all headline numbers reproducible via one documented command.
 6. ~~Give XBRL-tool answers a real citation, not just passages~~ **Done**: `agent/tools.py::_register_fact`
    + `Citation.kind` (ERROR_ANALYSIS.md 3d), then ~~fix `computed_metric` scoring zero on the natural
    probe~~ **Done**: `get_financial_metric` answers a ratio name directly instead of erroring and
-   hoping the model retries with `compute_ratio` (ERROR_ANALYSIS.md 3e). Natural-probe citation
-   hygiene 7.7% → 28.6%, accuracy 0.808 → 0.885 (net positive vs. the original baseline, zero new
-   regressions from the second fix). What's left, in the priority order 3e's failure-cause counts
-   suggest:
-   (a) extend the filing catalogue so a "latest restated value" fact can be cited even when its own
-   accession was never downloaded (the largest remaining structural cause, ~20% of citation-hygiene
-   failures in the latest run) - needs a live EDGAR fetch per missing accession, not done here;
-   (b) a `compute_growth`-style tool for `trend` questions (mirroring `compute_ratio`'s
+   hoping the model retries with `compute_ratio` (ERROR_ANALYSIS.md 3e), then ~~close the largest
+   citation-hygiene bucket (model omitted an available citation)~~ **Done**:
+   `generation/citations.py::attribute_claims` attaches a real citation when an uncited sentence
+   demonstrably reuses a retrieved-but-uncited passage's own vocabulary, verified per claim rather
+   than attached just because a passage was retrieved (ERROR_ANALYSIS.md 3f). Natural-probe
+   citation hygiene 7.7% → **60.7%**, accuracy 0.808 → 0.885 - net positive vs. the original
+   baseline, zero new regressions across all three fixes (each verified by a full per-question
+   paired diff, not just the aggregate rate). What's left, in the priority order the failure-cause
+   counts suggest:
+   (a) a narrower, differently-shaped fix for a comparison/ratio's dropped `cite_as` (`nat-cmp-015`):
+   match a stated *computed* value back to the tool call that produced it, not to a fact's own raw
+   value - one case observed, not yet enough to design the general version from (3f);
+   (b) extend the filing catalogue so a "latest restated value" fact can be cited even when its own
+   accession was never downloaded (~20% of citation-hygiene failures before 3f, still real) - needs
+   a live EDGAR fetch per missing accession, not done here;
+   (c) a `compute_growth`-style tool for `trend` questions (mirroring `compute_ratio`'s
    formula+citation shape), closing the one bucket where the model still computes a figure itself
-   instead of a tool doing it (2 of 28 non-abstained answers, one arithmetically wrong);
-   (c) re-measure `gold_v1` dev/test citation hygiene against both fixes - not yet done, see
-   `scripts/collect_results.py`'s "Citation hygiene" caveat.
+   instead of a tool doing it (one instance observed arithmetically wrong);
+   (d) re-measure `gold_v1` dev citation hygiene against all three fixes - test is now re-measured
+   (0.0% → 55.0%), dev is not; see `scripts/collect_results.py`'s "Citation hygiene" caveat.
 
 ## Stretch ideas
 

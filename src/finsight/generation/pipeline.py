@@ -17,7 +17,7 @@ from finsight.config.settings import LLMSettings
 from finsight.core.filters import RetrievalFilters
 from finsight.core.logging import bind_trace_id, get_logger
 from finsight.core.schemas import Answer, QueryType, Usage
-from finsight.generation.citations import repair_citations, validate_citations
+from finsight.generation.citations import attribute_claims, repair_citations
 from finsight.generation.context import Source, build_context
 from finsight.generation.guardrails import flag_suspicious_sources, is_out_of_scope
 from finsight.generation.llm import LLMClient
@@ -108,7 +108,7 @@ class RagPipeline:
                 usage=usage,
             )
 
-        report = validate_citations(text, context)
+        text, report = attribute_claims(text, context)
         cited = {c.source_id for c in report.citations}
         # RagPipeline's Context is always built by build_context, so every source is a passage -
         # the isinstance narrows the type for mypy (Context is shared with the agent's fact
@@ -121,6 +121,7 @@ class RagPipeline:
             *(f"citation to unknown source {label}" for label in report.invalid_ids),
             *(f"uncited claim: {sentence[:90]}" for sentence in report.uncited_sentences),
             *(f"unverified figure: {n}" for n in unverified_numbers(text, evidence)),
+            *(f"citation does not support its claim: {label}" for label in report.unsupported_ids),
         )
         for warning in warnings:
             log.warning("answer.validation", warning=warning)

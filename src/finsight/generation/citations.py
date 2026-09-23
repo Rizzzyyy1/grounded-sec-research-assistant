@@ -6,12 +6,28 @@ reported XBRL fact (:class:`~finsight.generation.context.FactSource`) - turns va
 :class:`Citation` objects (with a display quote/detail and a real filing URL), and finds *uncited*
 sentences - the claims a reader cannot trace to either kind of evidence.
 
-``validate_citations`` alone is not enough to make an answer trustworthy: it reports which labels
-are invalid, but the raw model text still contains them verbatim, so a reader sees what looks like
-a resolved citation pointing at nothing (observed live with a local 3B model: it wrote ``[S1]``
-after a figure even though no ``search_filings`` call had ever registered an ``S1``).
-``repair_citations`` is the general rule that closes that gap: every bracket a *user* sees in the
-final answer must resolve to evidence this run actually produced, or it is rewritten to say so.
+``validate_citations`` alone is not enough to make an answer trustworthy, in two directions:
+
+* it reports which labels are invalid, but the raw model text still contains them verbatim, so a
+  reader sees what looks like a resolved citation pointing at nothing (observed live with a local
+  3B model: it wrote ``[S1]`` after a figure even though no ``search_filings`` call had ever
+  registered an ``S1``). ``repair_citations`` closes that gap: every bracket a *user* sees in the
+  final answer must resolve to evidence this run actually produced, or it is rewritten to say so.
+* a claim can go **uncited even though the run gathered real support for it** - observed live: a
+  qualitative answer paraphrased a retrieved 10-K passage closely enough to share most of its
+  distinctive vocabulary, but the model never wrote the bracket at all (ERROR_ANALYSIS.md 3f).
+  ``attribute_claims`` closes that gap the other way: it checks every uncited sentence against
+  every retrieved-but-uncited passage this run produced and, only where the sentence demonstrably
+  reuses that passage's own content (not merely "a passage exists for this question"), adds the
+  real citation. A sentence that matches nothing stays flagged uncited - this never manufactures
+  support a tool did not actually gather (calibration and the boundary between a genuine paraphrase
+  and an ungrounded, if factually correct, answer are in ERROR_ANALYSIS.md 3f).
+
+The same lexical-support check also runs the other way, as a *diagnostic*: a citation a model
+wrote can **resolve** to a real passage without that passage actually **supporting** the sentence
+it is attached to. ``CitationReport.unsupported_ids`` reports this separately from
+``invalid_ids`` - "resolves" and "supports the claim" are different questions, and conflating them
+would hide whichever one a reader most needs to know.
 """
 
 from __future__ import annotations
@@ -22,6 +38,7 @@ from dataclasses import dataclass
 from finsight.core.schemas import Citation
 from finsight.generation.context import Context, FactSource, Source
 from finsight.generation.prompts import ABSTAIN_TOKEN
+from finsight.indexing.sparse_index import tokenize
 
 _LABEL_GROUP = re.compile(r"\[\s*(S\d+(?:\s*[,;]\s*S\d+)*)\s*\]", re.IGNORECASE)
 _LABEL = re.compile(r"S\d+", re.IGNORECASE)
@@ -30,6 +47,15 @@ _SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z$\d]|\[(?!S\d))")
 _QUOTE_CHARS = 280
 _MIN_WORDS_FOR_CLAIM = 6
 UNVERIFIED_MARKER = "[unverified]"
+# Calibrated against real traces (ERROR_ANALYSIS.md 3f): a genuine paraphrase of a 10-K passage
+# shared 53-100% of its distinctive terms with that passage (8-16 shared terms); an answer drawn
+# from the model's own training-data familiarity, not the retrieved text, shared none with any
+# retrieved passage. This is a deterministic, explainable proxy for support - not a semantic
+# entailment judgement, and no LLM judge is used here (matching this project's zero-cost
+# evaluation philosophy) - so it is calibrated to be conservative: a real but loosely-worded
+# paraphrase may still miss it and stay flagged uncited, which is the safe direction to fail in.
+_MIN_SHARED_TERMS = 4
+_MIN_OVERLAP_RATIO = 0.4
 
 
 @dataclass(frozen=True)
@@ -37,6 +63,11 @@ class CitationReport:
     citations: tuple[Citation, ...]
     invalid_ids: tuple[str, ...]  # labels the model used that match no provided source
     uncited_sentences: tuple[str, ...]
+    #: Labels that resolve to a real passage (kind="fact" citations are out of scope here - see
+    #: module docstring) whose content does not clearly support the sentence citing it. Diagnostic
+    #: only, deliberately not part of `ok` - "resolves" and "supports the claim" are reported
+    #: separately, not conflated into one pass/fail bit.
+    unsupported_ids: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -76,27 +107,121 @@ def _to_citation(label: str, source: Source | FactSource) -> Citation:
     )  # fmt: skip
 
 
+def support_ratio(claim: str, passage_text: str) -> float:
+    """Fraction of the claim's distinctive terms also present in the passage - 0 if the claim has
+    no terms to check. Exported (not underscore-prefixed) so evaluation code and tests can report
+    the raw score, not just the pass/fail threshold - see :func:`_passage_supports`."""
+    claim_terms = set(tokenize(strip_labels(claim)))
+    if not claim_terms:
+        return 0.0
+    shared = claim_terms & set(tokenize(passage_text))
+    return len(shared) / len(claim_terms)
+
+
+def _passage_supports(claim: str, source: Source) -> bool:
+    claim_terms = set(tokenize(strip_labels(claim)))
+    if len(claim_terms) < _MIN_SHARED_TERMS:
+        return False
+    shared = claim_terms & set(tokenize(source.chunk.text))
+    return len(shared) >= _MIN_SHARED_TERMS and len(shared) / len(claim_terms) >= _MIN_OVERLAP_RATIO
+
+
+def _claim_sentences(answer: str) -> list[str]:
+    """Sentences worth checking for a citation - skips headings, lead-ins and short connectives,
+    and everything once the model has abstained (an abstain reason makes no claim to support)."""
+    if answer.strip().startswith(ABSTAIN_TOKEN):
+        return []
+    out = []
+    for raw in _SENTENCE.split(answer.strip()):
+        sentence = raw.strip()
+        words = len(strip_labels(sentence).split())
+        if words < _MIN_WORDS_FOR_CLAIM or sentence.endswith(":"):
+            continue
+        out.append(sentence)
+    return out
+
+
 def validate_citations(answer: str, context: Context) -> CitationReport:
     citations: list[Citation] = []
     invalid: list[str] = []
+    by_id: dict[str, Source | FactSource] = {}
     for label in cited_ids(answer):
         source = context.get(label)
         if source is None:
             invalid.append(label)
             continue
         citations.append(_to_citation(label, source))
+        by_id[label] = source
 
     uncited: list[str] = []
-    if not answer.strip().startswith(ABSTAIN_TOKEN):
-        for raw in _SENTENCE.split(answer.strip()):
-            sentence = raw.strip()
-            words = len(strip_labels(sentence).split())
-            if words < _MIN_WORDS_FOR_CLAIM or sentence.endswith(":"):
-                continue  # headings, lead-ins and short connectives make no claim
-            labels = _LABEL_GROUP.findall(sentence)
-            if not any(context.get(lbl.upper()) for g in labels for lbl in _LABEL.findall(g)):
-                uncited.append(sentence)
-    return CitationReport(tuple(citations), tuple(invalid), tuple(uncited))
+    unsupported: set[str] = set()
+    for sentence in _claim_sentences(answer):
+        labels = [lbl.upper() for g in _LABEL_GROUP.findall(sentence) for lbl in _LABEL.findall(g)]
+        resolved = [by_id[lbl] for lbl in labels if lbl in by_id]
+        if not resolved:
+            uncited.append(sentence)
+            continue
+        passages = [s for s in resolved if isinstance(s, Source)]
+        # Only judge "supports the claim" when every resolved source on this sentence is a
+        # passage - a fact citation's support is a different question (module docstring) and is
+        # not checked here, so a sentence mixing kinds is left out of this diagnostic entirely.
+        supported = any(_passage_supports(sentence, s) for s in passages)
+        if passages and len(passages) == len(resolved) and not supported:
+            unsupported.update(
+                lbl for lbl in labels if lbl in by_id and isinstance(by_id[lbl], Source)
+            )
+    return CitationReport(
+        tuple(citations), tuple(invalid), tuple(uncited), tuple(sorted(unsupported))
+    )
+
+
+def attribute_claims(answer: str, context: Context) -> tuple[str, CitationReport]:
+    """The general fix for a claim the model stated but never cited: verify - against the
+    *specific* evidence this run actually produced, not just "something was retrieved for this
+    question" - whether an uncited sentence is genuinely supported by a passage nothing cited yet,
+    and make that support visible as a real citation rather than leaving it to the model's memory
+    to bracket correctly. A sentence that matches no passage's own content stays flagged uncited:
+    this never manufactures support a tool did not actually gather. See the module docstring and
+    ERROR_ANALYSIS.md 3f for calibration and the (deliberate) scope limit to passage citations.
+    """
+    report = validate_citations(answer, context)
+    if not report.uncited_sentences:
+        return answer, report
+
+    cited_ids_ = {c.source_id for c in report.citations}
+    candidates = [s for s in context.sources if s.id not in cited_ids_ and isinstance(s, Source)]
+    if not candidates:
+        return answer, report
+
+    text = answer
+    new_citations: list[Citation] = []
+    attributed: set[str] = set()
+    for sentence in report.uncited_sentences:
+        best: tuple[float, Source] | None = None
+        for source in candidates:
+            if not _passage_supports(sentence, source):
+                continue
+            ratio = support_ratio(sentence, source.chunk.text)
+            if best is None or ratio > best[0]:
+                best = (ratio, source)
+        if best is None or sentence not in text:
+            continue
+        source = best[1]
+        text = text.replace(sentence, f"{sentence} [{source.id}]", 1)
+        new_citations.append(_to_citation(source.id, source))
+        attributed.add(sentence)
+
+    if not new_citations:
+        return answer, report
+
+    remaining_uncited = tuple(s for s in report.uncited_sentences if s not in attributed)
+    updated = CitationReport(
+        citations=report.citations + tuple(new_citations),
+        invalid_ids=report.invalid_ids,
+        uncited_sentences=remaining_uncited,
+        unsupported_ids=report.unsupported_ids,
+    )
+    return text, updated
 
 
 def repair_citations(answer: str, report: CitationReport) -> str:

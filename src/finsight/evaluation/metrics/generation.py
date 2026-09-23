@@ -68,11 +68,17 @@ def abstention_scores(pairs: Sequence[tuple[GoldExample, Answer]]) -> Abstention
 @dataclass(frozen=True)
 class CitationHygiene:
     """``clean`` is the pass/fail bit every report reads; its definition has not changed, so a
-    run's ``citation_clean_rate`` stays comparable across the citation-display fix and the
-    source-provenance fix (both only changed how many answers *can* satisfy it, never what
-    satisfying it means). ``citation_kinds`` is purely diagnostic, added when fact citations
-    (agent/tools.py::_register_fact) started making ``has_citation`` reachable for numeric
-    answers, not just ones citing a retrieved passage - see EVALUATION.md 3.2.
+    run's ``citation_clean_rate`` stays comparable across the citation-display fix, the
+    source-provenance fix and the claim-attribution fix (each only changed how many answers *can*
+    satisfy it, or how they get there, never what satisfying it means). ``citation_kinds`` and
+    ``unsupported_citations`` are purely diagnostic. ``citation_kinds`` was added when fact
+    citations (agent/tools.py::_register_fact) started making ``has_citation`` reachable for
+    numeric answers, not just ones citing a retrieved passage. ``unsupported_citations`` answers a
+    different question from ``invalid_citations``: a citation can **resolve** to a real passage
+    (not invalid) while that passage still does not **support** the specific sentence it is
+    attached to (`generation/citations.py::_passage_supports`, ERROR_ANALYSIS.md 3f) - "resolves"
+    and "supports the claim" are reported as separate measures, not conflated into one - see
+    EVALUATION.md 3.2.
     """
 
     has_citation: bool
@@ -80,6 +86,7 @@ class CitationHygiene:
     uncited_claims: int
     unverified_figures: int
     citation_kinds: frozenset[str] = frozenset()
+    unsupported_citations: int = 0
 
     @property
     def clean(self) -> bool:
@@ -93,6 +100,7 @@ def citation_hygiene(answer: Answer) -> CitationHygiene:
     return CitationHygiene(
         has_citation=bool(answer.citations),
         invalid_citations=sum(x.startswith("citation to unknown") for x in w),
+        unsupported_citations=sum(x.startswith("citation does not support") for x in w),
         uncited_claims=sum(x.startswith("uncited claim") for x in w),
         unverified_figures=sum(x.startswith("unverified figure") for x in w),
         citation_kinds=frozenset(c.kind for c in answer.citations),

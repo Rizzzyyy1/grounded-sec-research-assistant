@@ -339,6 +339,124 @@ the warning label alone - a warning names a *symptom*, not always the *cause*:
    from without risking exactly the in-sample tuning this project has repeatedly refused to do
    (§3b, `scripts/make_gold_v2_draft.py`'s own warning). Worth a wider audit before acting on it.
 
+## 3f. Closing the largest citation-hygiene bucket: claims the model stated but never cited
+
+§3e's failure-cause table put "model omitted an available citation" at 13 of 20 issues (65%) -
+the largest bucket by far. Before writing any code, every one of the 13 was read in full: its
+question, tool trace, full answer text, citations and warnings.
+
+**Grouped by mechanism, not just by symptom:**
+
+| Group | Count | IDs | What actually happened |
+|---|---|---|---|
+| Qualitative answer, real passages retrieved, zero brackets anywhere | 10 | `nat-txt-027/028/029/030/031/032/033/034/036/038` | `search_filings` returned real, citable passages (each with its own `source_id`); the model paraphrased them, sometimes closely, and never wrote a single `[S#]` |
+| Comparison, a valid ready-made `cite_as` bracket dropped | 1 | `nat-cmp-015` | `compare_companies` returned `cite_as: "[S3, S4]"` for the exact value the model stated; the model used the number and dropped the bracket |
+| No tool executed at all | 1 | `nat-inj-026` | The model narrated a fake tool call as plain text instead of issuing one (the pre-existing quirk in §3c bullet (c)) - there was no evidence to cite because none was ever gathered |
+| Malformed mid-answer abstain token | 1 | `nat-txt-037` | The model embedded `INSUFFICIENT_EVIDENCE` **inside** the answer, not at the start, on a fragment mixed in with genuinely cited claims - a distinct, narrow parsing edge case, not the same mechanism as the other 10 |
+
+**Two representative traces, checked against the actual retrieved text before any fix was
+written** (both reproduced deterministically outside the eval harness):
+
+* `nat-txt-027`, "What does Apple say could go wrong with its supply chain?" - the answer's first
+  bullet, *"Disruptions to its outsourcing partners and suppliers, which could lead to a shortage
+  of components and finished goods, and negatively impact the company's business and
+  reputation,"* shares 8 of its 15 distinctive terms with the retrieved `search_filings` passage
+  S1 (*"...outsourcing partners...experience severe financial problems or other disruptions in
+  their business, such continued supply can be disrupted..."*); the second bullet shares **16 of
+  16** terms with passage S2, almost verbatim. This is a passage the model read and paraphrased
+  faithfully, and simply never bracketed.
+* `nat-txt-032`, "Who does Coca-Cola see as its main competitors?" - the answer named PepsiCo,
+  Keurig Dr Pepper and Red Bull, all factually real competitors. But the retrieved passages
+  (S1-S3) never mention any of them by name - S1 only says the company "compete[s] against
+  retailers that have developed their own store or private-label beverage brands," and S2/S3 are
+  unrelated accounting-policy notes. Zero shared distinctive terms. This answer came from the
+  model's own training-data familiarity, not the filings it was given - and correctly staying
+  uncited is the right outcome for it, not a case this fix should "solve" by inventing a citation.
+
+These two traces set the calibration question precisely: **a genuine paraphrase reuses a passage's
+own distinctive vocabulary; an ungrounded (even if factually correct) answer does not.** That
+distinction, not "was a passage retrieved for this question," is what the fix has to test.
+
+### Design: verify support, don't just check retrieval happened
+
+`generation/citations.py::attribute_claims` is the general fix, run for every uncited sentence
+against every retrieved-but-uncited passage this run produced:
+
+* **Structured, not prompt-based.** No wording was added to the system prompt for this - the
+  existing instruction to bracket cited sentences was already there and already insufficient
+  (§3c). Instead, `attribute_claims` links each *claim* to the *specific tool result* that
+  produced it, deterministically, after the model has already answered.
+* **Verifies support, not mere retrieval.** For each candidate passage, `_passage_supports`
+  requires the claim to share at least 4 distinctive terms with the passage **and** at least 40%
+  of the claim's own terms to overlap it (`indexing/sparse_index.py::tokenize`, the same
+  tokenizer the extractive baseline already uses for its own overlap scoring) - calibrated
+  directly against the two traces above: 53-100% overlap for a genuine paraphrase, 0% for an
+  ungrounded one. This is a deterministic, explainable proxy for support, not a semantic
+  entailment judgement - no LLM judge is used, matching this project's zero-cost evaluation
+  philosophy - so it is tuned conservative: a real but loosely-worded paraphrase may still miss
+  the threshold and stay flagged uncited, which is the safe direction to fail in.
+* **Preserves explicit uncertainty.** A sentence matching no passage's content is left exactly as
+  the model wrote it and stays in `uncited_sentences` - `nat-txt-032`-style answers are not
+  "fixed" by this change, and should not be.
+* **Never touches fact/calculation citations.** `nat-cmp-015`'s mechanism is structurally
+  different: the value stated ("32.1%") is a *computed* ratio, and neither of its two underlying
+  facts' own raw values ("$112,390 million", "$350,018 million") appears anywhere in the claim -
+  a lexical check against the raw facts would never fire, and forcing it into the same code path
+  would mean building a *second*, differently-shaped mechanism (matching a stated result back to
+  the tool call that produced it, not to a fact's own value) under the same name. That is not
+  justified from one case in a 20-issue sample; see "not fixed" below.
+
+**The same check runs in the other direction as a diagnostic, not just for attribution.** A
+citation the model wrote can *resolve* to a real source without that source's content actually
+*supporting* the sentence it sits in - a different question from "is the id real," and one
+`invalid_ids` cannot answer. `CitationReport.unsupported_ids` (and `CitationHygiene
+.unsupported_citations`) report it separately, deliberately outside `clean`'s definition so
+existing runs stay comparable. In this session's live runs it fired **zero times** - reported
+plainly rather than implied to be catching something it has not yet been observed to catch; its
+tests (`test_a_resolved_citation_that_does_not_support_its_claim_is_flagged_separately`) construct
+the case directly rather than waiting for one to occur.
+
+### Results
+
+**Affected subset (13 questions), run first:**
+`reports/runs/20260923-025901-agent-ollama-omitted-citation-subset-fix/` - citation hygiene
+0% → 61.5% (8 of 13 now clean), **zero correctness changes** (verified per-question against the
+immediately prior run: every `correct` value identical). 10 of the 10 "zero brackets anywhere"
+group gained a real citation; `nat-cmp-015` and `nat-inj-026` are unchanged, exactly as scoped;
+`nat-txt-037` gained 2 citations but keeps one warning from its malformed mid-answer token.
+
+**Full natural probe** (`reports/runs/20260923-030441-agent-ollama-natural-attribution-fix/` vs.
+the immediately prior run): citation hygiene **28.6% → 60.7%**, accuracy **unchanged at 0.885**
+(0 of 38 questions changed correctness). 11 questions gained at least one citation (the 10 above
+plus `nat-txt-035`, the NVDA cybersecurity answer flagged in §3e's "another cause" bucket, closed
+as a side effect of the same mechanism).
+
+**`gold_v1` test split** (`reports/runs/20260923-031525-agent-ollama-test-attribution-fix/` vs.
+the immediately prior run): citation hygiene **32.5% → 55.0%**, accuracy **unchanged at 0.853**
+(0 of 49 questions changed correctness), 9 questions gained a citation. `unsupported_ids` fired
+zero times on either split.
+
+**Net effect vs. the original, pre-any-citation-work baseline**
+(`reports/runs/20260922-052052-agent-ollama-natural/`): natural-probe citation hygiene
+**7.7% → 60.7%** (≈7.9×), accuracy **0.808 → 0.885** (net **+0.077**, unchanged from §3e - this
+fix added zero accuracy risk on top of it).
+
+### What was not fixed, and why
+
+* **`nat-cmp-015`** (the comparison with a dropped `cite_as`): a narrower, differently-shaped fix
+  is needed - matching a stated *computed* value back to the specific tool call that produced it
+  (not to a fact's own raw value) - and one case is not enough evidence to design it from without
+  guessing. Proposed narrower next step: have `compare_companies`/`compute_ratio` return their
+  `formatted` value keyed to their `cite_as`, and check an uncited sentence's stated figure
+  against *that* mapping specifically, as a second, distinct pass from `attribute_claims`.
+* **`nat-inj-026`** (no tool executed): unrelated to citation attribution - the model narrated a
+  tool call instead of issuing one, so there was no evidence to attach regardless. Already
+  disclosed in §3c; not a citation-system defect.
+* **`nat-txt-037`**'s mid-answer `INSUFFICIENT_EVIDENCE` fragment: a narrow parsing edge case (the
+  abstain-prefix check only recognises the token at the very start of the answer, per the system
+  prompt's own instruction) affecting one question in this sample - noted, not chased into a
+  general fix from a single occurrence.
+
 ## 4. Design changes forced by evidence
 
 * **Reranker is opt-in** (ablation A1: better ordering, no recall gain, ~16× latency) — ADR-0002 amended.

@@ -8,12 +8,15 @@ from finsight.core.schemas import RetrievedChunk
 from finsight.generation.citations import (
     UNVERIFIED_MARKER,
     CitationReport,
+    attribute_claims,
     cited_ids,
     repair_citations,
     strip_labels,
+    support_ratio,
     validate_citations,
 )
-from finsight.generation.context import Context, build_context, render_source
+from finsight.generation.context import Context, FactSource, build_context, render_source
+from finsight.generation.prompts import ABSTAIN_TOKEN
 from finsight.generation.verification import figures_in, normalise, unverified_numbers
 
 from tests.unit.conftest import ChunkFactory  # isort: skip
@@ -271,3 +274,158 @@ def test_accession_numbers_and_form_names_are_identifiers_not_figures() -> None:
     text = "Revenue was $391,035 million (Form 10-K, accession 0000320193-24-000123)."
     assert unverified_numbers(text, ["Revenue $391,035 million"]) == []
     assert figures_in("see 10-K and 8-K, accession 0000320193-24-000123") == set()
+
+
+# ------------------------------------------------------------------ claim attribution
+# Calibrated against real traces, not invented numbers - see ERROR_ANALYSIS.md 3f. A genuine
+# paraphrase of a 10-K passage shared 53-100% of its distinctive terms with that passage; an
+# answer drawn from the model's own training-data familiarity, not the retrieved text, shared none
+# with any retrieved passage. These fixtures reproduce that same separation with synthetic content
+# (not copied from any gold question) so the mechanism, not one benchmark answer, is under test.
+_SUPPLY_CHAIN_PASSAGE = (
+    "The Company depends on outsourcing partners and contract manufacturers for the assembly of "
+    "its products, and if these partners experience severe financial problems or other "
+    "disruptions in their business, the supply of components and finished goods could be "
+    "disrupted or delayed, adversely affecting the Company's business and results of operations."
+)
+_SUPPLY_CHAIN_CLAIM = (
+    "The company depends on outsourcing partners and contract manufacturers for the assembly of "
+    "its products, and disruptions at these partners could delay the supply of components and "
+    "finished goods."
+)
+_UNRELATED_PASSAGE = (
+    "The Company's effective tax rate is affected by earnings realized in foreign jurisdictions "
+    "with statutory rates different from the U.S. federal statutory rate, and by changes in "
+    "valuation allowances for deferred tax assets."
+)
+_UNSUPPORTED_CLAIM = (
+    "The company believes its brand is highly valued by consumers worldwide and plans to expand "
+    "its retail presence across several emerging markets over the next five years."
+)
+
+
+def fact_source(sid: str = "S1", *, ticker: str = "AAPL", year: int = 2024) -> FactSource:
+    return FactSource(
+        id=sid, ticker=ticker, fiscal_year=year, metric="revenue", tag="Revenues",
+        url=f"https://example.com/{sid}", detail=f"Revenue: $391,035 million (XBRL tag Revenues, "
+        f"10-K FY{year} FY, accession 0000320193-24-000123)",
+    )  # fmt: skip
+
+
+def test_support_ratio_separates_a_genuine_paraphrase_from_an_ungrounded_claim() -> None:
+    supported = support_ratio(_SUPPLY_CHAIN_CLAIM, _SUPPLY_CHAIN_PASSAGE)
+    unsupported = support_ratio(_UNSUPPORTED_CLAIM, _UNRELATED_PASSAGE)
+    assert supported >= 0.5  # matches the 0.53-1.00 range observed on real traces
+    assert unsupported == 0.0
+
+
+def test_sourced_qualitative_summary_gets_attributed(make_chunk: ChunkFactory) -> None:
+    """The mechanism this fix exists for: a genuine paraphrase of a retrieved passage that the
+    model never bracketed at all gets a real, resolvable citation attached - not because the
+    passage was retrieved for this question, but because its own content demonstrably supports
+    this specific sentence."""
+    passage = make_chunk(_SUPPLY_CHAIN_PASSAGE, ticker="AAPL", year=2024, item="1A")
+    ctx = build_context([rc(passage)], budget_tokens=9_999)
+    text, report = attribute_claims(_SUPPLY_CHAIN_CLAIM + ".", ctx)
+    assert text == _SUPPLY_CHAIN_CLAIM + ". [S1]"
+    assert [c.source_id for c in report.citations] == ["S1"]
+    assert report.uncited_sentences == ()
+
+
+def test_unsupported_claim_stays_flagged_not_silently_attributed(make_chunk: ChunkFactory) -> None:
+    """The other half of the same guarantee: a passage existing in this run's context is not
+    enough to cite it - preserving explicit uncertainty when nothing actually supports the claim,
+    exactly the case observed live (a factually correct answer drawn from training data, not the
+    retrieved 10-K text, which named no source in common with it)."""
+    passage = make_chunk(_UNRELATED_PASSAGE, ticker="AAPL", year=2024, item="7")
+    ctx = build_context([rc(passage)], budget_tokens=9_999)
+    text, report = attribute_claims(_UNSUPPORTED_CLAIM + ".", ctx)
+    assert text == _UNSUPPORTED_CLAIM + "."  # unchanged - no bracket invented
+    assert report.citations == ()
+    assert report.uncited_sentences == (_UNSUPPORTED_CLAIM + ".",)
+
+
+def test_mixed_supported_and_unsupported_claims_in_one_answer(make_chunk: ChunkFactory) -> None:
+    """A single answer combining a genuinely sourced claim and an unsupported one is handled
+    sentence by sentence: one gains a citation, the other stays honestly flagged - the two must
+    never be conflated into one pass/fail verdict for the whole answer."""
+    supply_chain = make_chunk(_SUPPLY_CHAIN_PASSAGE, ticker="AAPL", year=2024, item="1A")
+    unrelated = make_chunk(_UNRELATED_PASSAGE, ticker="AAPL", year=2024, item="7")
+    ctx = build_context([rc(supply_chain), rc(unrelated)], budget_tokens=9_999)
+    answer = f"{_SUPPLY_CHAIN_CLAIM}. {_UNSUPPORTED_CLAIM}."
+    text, report = attribute_claims(answer, ctx)
+    assert f"{_SUPPLY_CHAIN_CLAIM}. [S1]" in text
+    assert _UNSUPPORTED_CLAIM in text and f"{_UNSUPPORTED_CLAIM}. [S1]" not in text
+    assert len(report.citations) == 1 and report.citations[0].source_id == "S1"
+    assert report.uncited_sentences == (_UNSUPPORTED_CLAIM + ".",)
+
+
+def test_abstained_answer_is_never_attributed(make_chunk: ChunkFactory) -> None:
+    passage = make_chunk(_SUPPLY_CHAIN_PASSAGE, ticker="AAPL", year=2024, item="1A")
+    ctx = build_context([rc(passage)], budget_tokens=9_999)
+    answer = f"{ABSTAIN_TOKEN}: the filings do not state this directly."
+    text, report = attribute_claims(answer, ctx)
+    assert text == answer
+    assert report.citations == () and report.uncited_sentences == ()
+
+
+def test_numeric_fact_citations_are_not_touched_by_claim_attribution() -> None:
+    """Calculations and direct numeric facts are out of scope for this fix (module docstring):
+    a sentence whose only citation is a fact, not a passage, is left exactly as the model wrote
+    it - attribution only ever adds passage citations, never touches or duplicates a fact one."""
+    fact = fact_source("S1")
+    ctx = Context(sources=(fact,), text="", tokens=0)
+    answer = "Apple's revenue in fiscal 2024 was $391,035 million. [S1]"
+    text, report = attribute_claims(answer, ctx)
+    assert text == answer
+    assert [c.source_id for c in report.citations] == ["S1"]
+    assert report.uncited_sentences == ()
+
+
+def test_comparison_sentence_citing_two_facts_is_not_touched(make_chunk: ChunkFactory) -> None:
+    """A ratio or comparison citing two facts together (agent/tools.py's cite_as, e.g. [S1, S2])
+    is a fact-only sentence - out of scope here for the same reason as the single-fact case."""
+    facts = (fact_source("S1", ticker="AAPL"), fact_source("S2", ticker="MSFT"))
+    ctx = Context(sources=facts, text="", tokens=0)
+    answer = "Apple's revenue in fiscal 2024 was higher than Microsoft's. [S1, S2]"
+    text, report = attribute_claims(answer, ctx)
+    assert text == answer
+    assert {c.source_id for c in report.citations} == {"S1", "S2"}
+
+
+def test_a_resolved_citation_that_does_not_support_its_claim_is_flagged_separately(
+    make_chunk: ChunkFactory,
+) -> None:
+    """ "Resolves" and "supports the claim" are different questions (module docstring): a label
+    that names a real source is never invalid, but if that source's own content has nothing to do
+    with the sentence it is attached to, the mismatch is reported through unsupported_ids, not
+    invalid_ids - a reader needs to know which failure they are looking at."""
+    passage = make_chunk(_UNRELATED_PASSAGE, ticker="AAPL", year=2024, item="7")
+    ctx = build_context([rc(passage)], budget_tokens=9_999)
+    answer = f"{_SUPPLY_CHAIN_CLAIM}. [S1]"  # S1 resolves, but S1's content is the tax passage
+    report = validate_citations(answer, ctx)
+    assert report.invalid_ids == ()  # S1 is a real, resolvable source
+    assert [c.source_id for c in report.citations] == ["S1"]
+    assert report.unsupported_ids == ("S1",)  # ... that does not support this sentence
+    assert report.uncited_sentences == ()  # it has a label, so it is not "uncited"
+
+
+def test_a_resolved_citation_that_does_support_its_claim_is_not_flagged(
+    make_chunk: ChunkFactory,
+) -> None:
+    passage = make_chunk(_SUPPLY_CHAIN_PASSAGE, ticker="AAPL", year=2024, item="1A")
+    ctx = build_context([rc(passage)], budget_tokens=9_999)
+    answer = f"{_SUPPLY_CHAIN_CLAIM}. [S1]"
+    report = validate_citations(answer, ctx)
+    assert report.unsupported_ids == ()
+
+
+def test_a_fact_citation_is_never_judged_for_support() -> None:
+    """The support check is scoped to passages only (module docstring) - a fact-only sentence
+    never appears in unsupported_ids regardless of how unrelated its detail string reads, because
+    fact support is a different question this fix does not attempt to answer."""
+    fact = fact_source("S1")
+    ctx = Context(sources=(fact,), text="", tokens=0)
+    answer = "Something about the weather in a distant unrelated place entirely. [S1]"
+    report = validate_citations(answer, ctx)
+    assert report.unsupported_ids == ()

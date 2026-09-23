@@ -179,15 +179,29 @@ over-cautious rather than wrong - see 3d for the full regression story, includin
 and fixed along the way). A second, narrower fix - `get_financial_metric` answering a ratio name
 directly instead of erroring and hoping the model retries with `compute_ratio` (ERROR_ANALYSIS.md
 3e) - then took `computed_metric` accuracy from 0.000 to 0.750 with **zero new regressions**,
-pushing the same natural-probe run to **accuracy 0.885 / citation hygiene 28.6%** (net +0.077
-accuracy and ≈3.7× hygiene vs. the original, pre-any-citation-work baseline). `gold_v1` dev/test
-have still not been re-measured against either fix - flagged explicitly wherever their numbers
-appear rather than left stale and unlabelled. §3e also breaks citation-hygiene failures down by
-cause (missing filing-catalogue entry, model omitting an available citation, a self-computed figure
-unsupported by any evidence, and one validator loophole) with counts, not just the aggregate rate.
-`CitationHygiene.citation_kinds` (diagnostic only, does not affect `clean`) now records whether a
-clean answer's citation was a `fact`, a `passage`, or both, so a future report can tell which kind
-of grounding actually improved rather than reading one aggregate rate.
+pushing the same natural-probe run to accuracy 0.885 / citation hygiene 28.6%. §3e's failure-cause
+breakdown put "model omitted an available citation" at 65% of the remaining issues - the largest
+bucket by far - so it was addressed next: `generation/citations.py::attribute_claims`
+(ERROR_ANALYSIS.md 3f) checks every uncited sentence against every retrieved-but-uncited passage
+this run produced and attaches a real citation where the sentence demonstrably reuses that
+passage's own distinctive vocabulary (calibrated against real traces: 53-100% term overlap for a
+genuine paraphrase, 0% for an answer drawn from the model's own training-data familiarity instead
+of the retrieved text) - never merely because a passage was retrieved for the question. That took
+the same natural-probe run to **accuracy 0.885 / citation hygiene 60.7%**, again with **zero new
+regressions** (net vs. the original, pre-any-citation-work baseline: **+0.077 accuracy, ≈7.9×
+citation hygiene**). `gold_v1` test: citation hygiene 0.0% → 55.0%, accuracy 0.735 → 0.853, zero
+regressions across all three fixes; dev has still not been re-measured against any of them -
+flagged explicitly wherever its numbers appear rather than left stale and unlabelled.
+
+The same lexical-support check runs the other way too, as a diagnostic: `CitationReport
+.unsupported_ids` / `CitationHygiene.unsupported_citations` report when a citation the model wrote
+**resolves** to a real source that does not actually **support** the sentence it sits in - a
+different question from `invalid_citations`, reported separately rather than conflated with it,
+and deliberately excluded from `clean` so existing runs stay comparable. It has not yet fired on a
+live run (reported as such, not implied to be catching something unobserved); its tests construct
+the case directly. `CitationHygiene.citation_kinds` (also diagnostic, also outside `clean`) records
+whether a clean answer's citation was a `fact`, a `passage`, or both, so a future report can tell
+which kind of grounding actually improved rather than reading one aggregate rate.
 
 ### 3.3 System
 

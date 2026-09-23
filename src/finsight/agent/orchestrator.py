@@ -31,7 +31,7 @@ from finsight.agent.tools import AgentContext, SourceRegistry, ToolError, dispat
 from finsight.config.settings import LLMSettings
 from finsight.core.logging import bind_trace_id, get_logger
 from finsight.core.schemas import Answer, QueryType, ToolCallRecord, Usage
-from finsight.generation.citations import repair_citations, validate_citations
+from finsight.generation.citations import attribute_claims, repair_citations
 from finsight.generation.context import Source
 from finsight.generation.guardrails import is_out_of_scope
 from finsight.generation.llm import LLMClient, ToolUse
@@ -138,7 +138,7 @@ class ResearchAgent:
             )  # fmt: skip
 
         context = run_ctx.registry.context()
-        report = validate_citations(text, context)
+        text, report = attribute_claims(text, context)
         cited = {c.source_id for c in report.citations}
         # Cited fact values are already in `evidence` (every tool's own ToolOutput.evidence); only
         # cited *passages* need adding here, so only Source (never FactSource) entries qualify.
@@ -155,6 +155,7 @@ class ResearchAgent:
             *(f"citation to unknown source {label}" for label in report.invalid_ids),
             *(f"uncited claim: {x[:90]}" for x in uncited),
             *(f"unverified figure: {n}" for n in unverified_numbers(text, allowed)),
+            *(f"citation does not support its claim: {label}" for label in report.unsupported_ids),
         )
         for w in warnings:
             log.warning("agent.validation", warning=w)

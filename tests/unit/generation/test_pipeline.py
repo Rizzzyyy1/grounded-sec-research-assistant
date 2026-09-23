@@ -156,12 +156,13 @@ def test_model_abstention_is_recognised(make_chunk: ChunkFactory) -> None:
 @pytest.mark.parametrize(
     ("text", "expected_fragment", "expected_text"),
     [
-        # an invalid citation is both flagged AND rewritten - a reader must never see a bracket
-        # that looks like a resolved source but points at nothing.
+        # an invalid citation on a claim that matches nothing in the corpus is both flagged AND
+        # rewritten - a reader must never see a bracket that looks like a resolved source but
+        # points at nothing - and stays uncited, since nothing here actually supports it.
         (
-            "Net sales were $391,035 million in fiscal 2024 [S9].",
+            "The board approved a new share repurchase authorization this quarter [S9].",
             "unknown source S9",
-            "Net sales were $391,035 million in fiscal 2024 [unverified].",
+            "The board approved a new share repurchase authorization this quarter [unverified].",
         ),
         (
             "Apple reported a very strong year across all of its product lines worldwide.",
@@ -185,6 +186,23 @@ def test_validation_problems_become_warnings_and_invalid_citations_are_rewritten
     )
     assert any(expected_fragment in w for w in answer.warnings), answer.warnings
     assert answer.text == expected_text
+
+
+def test_an_invalid_citation_on_a_genuinely_supported_claim_is_rewritten_and_reattributed(
+    make_chunk: ChunkFactory,
+) -> None:
+    """The model's own [S9] was invalid (nothing in this run resolves to it) - repair_citations
+    still rewrites it to [unverified], since that specific bracket never becomes valid. But the
+    claim itself closely paraphrases a real corpus passage (attribute_claims finds it independent
+    of the bogus bracket), so the answer also gains a real, resolvable citation for it - a reader
+    is left with both signals: the model's citation was wrong, and a real source exists anyway."""
+    text = "Net sales were $391,035 million in fiscal 2024 [S9]."
+    answer = pipeline(make_chunk, ScriptedLLM(text)).answer(
+        "What were Apple's net sales in fiscal 2024?"
+    )
+    assert any("unknown source S9" in w for w in answer.warnings)
+    assert "[unverified]" in answer.text and "[S9]" not in answer.text
+    assert answer.citations and all(c.source_id != "S9" for c in answer.citations)
 
 
 def test_generation_errors_propagate(make_chunk: ChunkFactory) -> None:
