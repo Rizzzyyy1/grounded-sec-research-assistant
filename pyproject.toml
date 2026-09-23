@@ -83,8 +83,8 @@ all = ["finsight[data,ml,llm,eval,api,ui,notebooks]"]
 finsight = "finsight.cli:app"
 
 [project.urls]
-Documentation = "https://github.com/your-username/finsight/tree/main/docs"
-Source = "https://github.com/your-username/finsight"
+Documentation = "https://github.com/Rizzzyyy1/grounded-sec-research-assistant/tree/main/docs"
+Source = "https://github.com/Rizzzyyy1/grounded-sec-research-assistant"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/finsight"]

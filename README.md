@@ -5,7 +5,7 @@ deterministic XBRL analytics, and a tool-using agent (Claude, or a free local mo
 ADR-0011), with an evaluation harness that reports confidence intervals and admits where the
 system is weak.
 
-[![CI](https://github.com/your-username/finsight/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/finsight/actions)
+[![CI](https://github.com/Rizzzyyy1/grounded-sec-research-assistant/actions/workflows/ci.yml/badge.svg)](https://github.com/Rizzzyyy1/grounded-sec-research-assistant/actions)
 ![python](https://img.shields.io/badge/python-3.11%20|%203.12%20|%203.13-blue)
 ![types](https://img.shields.io/badge/mypy-strict-success)
 ![lint](https://img.shields.io/badge/ruff-clean-success)
