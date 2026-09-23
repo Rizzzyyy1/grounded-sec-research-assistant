@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from finsight.ingestion.xbrl.store import FactStore
 
 pytestmark = pytest.mark.unit
 runner = CliRunner()
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def test_version_command() -> None:
@@ -152,9 +154,15 @@ def test_every_documented_command_is_registered() -> None:
 
 
 def test_serve_and_ui_show_help_without_starting_anything() -> None:
-    # Rich wraps --help text to the detected terminal width; a narrow one (observed in CI, where
-    # no real terminal is attached) truncates "--port" to "-…" and breaks a naive substring check.
-    # Force a wide, deterministic width so this test doesn't depend on who/where it runs.
+    # A plain "--port" in result.stdout is environment-dependent in two independent ways: Rich
+    # wraps to the detected terminal width (a narrow one truncates "--port" to "-…"), and - the
+    # actual CI failure, only reproduced once color was forced locally too - Rich's option
+    # highlighter styles the leading "-" and "-port" as two separate ANSI spans, so the raw text
+    # never contains a contiguous "--port" substring once color is on, at any width. CI enables
+    # color even with no real terminal attached; this local run may not. Force a wide width
+    # (belt-and-braces against wrapping) and strip ANSI codes (the actual fix) so the check is
+    # deterministic regardless of who/where it runs.
     for command in ("serve", "ui"):
         result = runner.invoke(app, [command, "--help"], env={"COLUMNS": "200", "LINES": "50"})
-        assert result.exit_code == 0 and "--port" in result.stdout
+        assert result.exit_code == 0
+        assert "--port" in _ANSI.sub("", result.stdout)
