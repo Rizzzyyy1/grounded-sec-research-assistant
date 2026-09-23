@@ -1,5 +1,6 @@
 # FinSight: UI -> API -> Qdrant server (+ the local data volume).
 #
+#   docker compose config                # validate + print the resolved config
 #   docker compose up --build            # start everything
 #   docker compose run --rm api finsight ingest    # download filings + XBRL facts
 #   docker compose run --rm api finsight process   # parse + chunk
@@ -8,7 +9,13 @@
 # Set FINSIGHT_SEC__USER_AGENT and (optionally) ANTHROPIC_API_KEY or FINSIGHT_LLM_PROVIDER=ollama
 # in .env - see .env.example. For the free Ollama path, Ollama must run on the HOST (not in this
 # compose stack) and the api container needs FINSIGHT_OLLAMA__BASE_URL=http://host.docker.internal:11434
-# (Docker Desktop's name for the host; untested - this stack has not been built/run, see LIMITATIONS.md).
+# (Docker Desktop's name for the host - confirmed working: `docker exec finsight-api-1 python -c
+# "import urllib.request as u; print(u.urlopen('http://host.docker.internal:11434/api/version').read())"`).
+#
+# Host ports default to 8000 (api) / 6333 (qdrant) / 8501 (ui) and can be moved with
+# FINSIGHT_API_PORT / FINSIGHT_QDRANT_PORT / FINSIGHT_UI_PORT in .env if something else on the
+# host already holds one of them (verified: `docker compose up` fails fast with "port is already
+# allocated" rather than silently picking another port - set the *_PORT var and retry).
 name: finsight
 
 services:
@@ -18,7 +25,7 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     ports:
-      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:${FINSIGHT_QDRANT_PORT:-6333}:6333"
 
   api:
     build:
@@ -39,7 +46,7 @@ services:
     depends_on:
       - qdrant
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${FINSIGHT_API_PORT:-8000}:8000"
 
   ui:
     build:
@@ -54,7 +61,7 @@ services:
     depends_on:
       - api
     ports:
-      - "127.0.0.1:8501:8501"
+      - "127.0.0.1:${FINSIGHT_UI_PORT:-8501}:8501"
 
 volumes:
   qdrant_data:

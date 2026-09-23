@@ -63,6 +63,9 @@ investment advice**. The author is not a registered investment adviser.
   probe (paired diff -0.038, CI crosses zero) - it does not (yet, at this model size) close the gap either.
 * **The test split has been inspected** during error analysis and is no longer a clean holdout.
 * **Not validated live:** the Claude agent specifically (`--llm claude`, no API key available), the LLM
-  judge, the refusal-fallback request shape, Docker images. The agent *has* been run live against a free
+  judge, the refusal-fallback request shape. The agent *has* been run live against a free
   local model (`--llm ollama`, ADR-0011) - see [RESULTS](../reports/RESULTS.md) and ERROR_ANALYSIS 3c -
-  which is evidence about the architecture, not about Claude's quality.
+  which is evidence about the architecture, not about Claude's quality. **The Docker images now have
+  been** - `docker compose up --build` gives three healthy containers that answer a real query through
+  host Ollama (ERROR_ANALYSIS 3h); `finsight index` inside the container was only smoke-tested at a
+  200-chunk scale, not the full corpus, and `--llm claude` in Docker remains unrun.

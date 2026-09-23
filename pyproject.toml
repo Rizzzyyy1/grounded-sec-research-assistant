@@ -46,7 +46,13 @@ data = [
 ml = [
     "numpy>=1.26",
     "fastembed>=0.3",
-    "qdrant-client>=1.9",
+    # Upper bound matches the qdrant/qdrant server image pinned in docker-compose.yml: the
+    # client itself refuses to guarantee compatibility once its minor version leads the
+    # server's by more than one (confirmed live: v1.19 client against a v1.12 server logs
+    # "Qdrant client version ... is incompatible with server version ..." on every request,
+    # even though today's basic upsert/search calls happened to still work) - bump both
+    # together, never just the client.
+    "qdrant-client>=1.9,<1.13",
     "bm25s>=0.2",
 ]
 # Phase 4-6: generation + agent

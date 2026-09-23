@@ -57,6 +57,10 @@ check: lint typecheck arch test  ## What CI runs: lint + types + architecture + 
 doctor:  ## Check environment, credentials and installed extras
 	$(BIN)/finsight doctor
 
+.PHONY: docker-smoke
+docker-smoke:  ## Build + start the Docker Compose stack and verify it answers via Ollama
+	./docker/smoke_test.sh
+
 .PHONY: clean
 clean:  ## Remove caches and build artefacts (keeps data/)
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov dist build

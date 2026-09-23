@@ -84,7 +84,7 @@ Pick 3-5 for the role; do not use all of them.
 | "The LLM agent beats the router" (bare) | On the natural-phrasing probe the free local agent is statistically indistinguishable from the router (paired diff -0.038, CI crosses zero) - it *does* beat the extractive baseline decisively (+0.385, CI [0.19, 0.58]) | "Indistinguishable from the router, clearly ahead of the extractive baseline - both on a 3B model" |
 | "The agent is grounded / doesn't hallucinate" | Only 0-8% of the free local model's answers have a valid citation and no flagged claim (vs the extractive baseline's 96-100%); it sometimes cites a source that was never retrieved, or paraphrases from training-data familiarity instead of the retrieved passage - caught as warnings, not prevented | "Citation and numeric validators catch it and flag it; they do not yet block it, and citation hygiene is currently poor (0-8%) with this free model" |
 | "94% accuracy" (bare) | It is a templated-question result; natural phrasing gave 0.69 | "0.94 on templated held-out questions, 0.69 on natural rewrites" |
-| "Production-ready" / "scales to..." | One process, laptop, no LLM calls in the load test; Docker files never built | "Load-tested on one worker; scaling path documented" |
+| "Production-ready" / "scales to..." | One process, laptop, no LLM calls in the load test; Docker was verified to build and serve one user, not under load or at multi-worker scale | "Load-tested on one worker (no Docker); Docker verified to build/serve correctly, not load-tested; scaling path documented" |
 | "Retrieval recall of 0.90" | That is dev; the held-out figure is 0.57 (n=15, wide interval) | Quote both, and the reason |
 | "Human-verified gold set" | `gold_v1` is auto-derived; `gold_v2_draft` labels are unverified | "Programmatically derived, correct by construction for numbers" |
 | "Chunk overlap of 15% was tuned" | On BM25, no overlap scored as well or better (difference not significant) | "Chose 15% by convention; the ablation did not separate it from 0%" |
@@ -172,7 +172,12 @@ Nothing here can be done without your accounts, machine or judgement:
    them that way.
 2. **Push to GitHub** and confirm CI is green; replace the `your-username` placeholders.
 3. **Human-verify `gold_v2`** (`data/eval/gold_v2_draft.jsonl`): this is what turns the probes into a clean holdout. Procedure and worksheet: `docs/GOLD_V2_REVIEW_CHECKLIST.md` / `reports/gold_v2_review_worksheet.md` - prepared, not completed; no label has been approved.
-4. **Build the Docker image** (`docker compose up`) on a machine with Docker; fix whatever breaks.
+4. ~~Build the Docker image (`docker compose up`) on a machine with Docker; fix whatever breaks~~
+   **Done**: built and run live end to end (three healthy containers, UI opened in a browser, a
+   real query answered through host Ollama, container→host reachability confirmed) once Docker
+   Desktop became available - two real bugs found and fixed along the way (a hardcoded host-port
+   collision with an unrelated local project, and a Qdrant client/server version mismatch),
+   ERROR_ANALYSIS.md §3h. `make docker-smoke` reruns the same check.
 5. **Record a 60-second demo** (screen capture of `finsight ui`).
 6. ~~Wire a provider choice through the API/UI~~ **Done** (ADR-0012): `finsight serve --llm ollama`
    (or `FINSIGHT_LLM_PROVIDER=ollama`) serves the agent from the free local model with no API key;

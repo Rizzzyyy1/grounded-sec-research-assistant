@@ -30,7 +30,7 @@ changed, and why:
 | `finsight data coverage` | Shipped as `finsight coverage`; plus `known_gaps`, raw-availability and identity-coverage reporting |
 | Load test, import-linter | **Done**: [`reports/load_test.md`](../reports/load_test.md) (one worker, no LLM) and six import-linter contracts run by `make arch` and CI, each shown to fail on an injected violation. The first draft found a real `indexing` <-> `retrieval` cycle (`RetrievalFilters` moved to `core`) |
 | Ablations | A1, A2/A3 (BM25 half), A4 (BM25 half), A7 run; A5, A6-beyond-MiniLM, A8-with-LLM, A9 not run (need downloads or an API key) |
-| Docker | Files written and statically tested; **not built or run** (no Docker on the build machine) |
+| Docker | **Built and run**: Docker Desktop became available mid-project; `docker compose up --build` gives three healthy containers (`api`, `ui`, `qdrant`) that answer a real query through host Ollama, verified live and re-checkable with `make docker-smoke` (ERROR_ANALYSIS 3h). Full-corpus `finsight index` inside the container (23,221 chunks) was not run, only smoke-tested at 200 |
 | 10-Q / 8-K, FY2026 successor-CIK union, human gold set, running Claude specifically | Future work (below) |
 
 ---
@@ -149,7 +149,11 @@ security review (input limits, injection tests) · final README, write-up, model
 limitations.
 
 **Exit:** `docker compose up` gives a working system from a clean clone in < 15 minutes of work;
-all headline numbers reproducible via one documented command.
+all headline numbers reproducible via one documented command. **Verified**: build + start + first
+healthy `/readyz` took well under that (build ~2 min on a warm Docker cache, containers healthy
+within ~15s of start); `make docker-smoke` reruns the same check (ERROR_ANALYSIS 3h). "All headline
+numbers reproducible" still means `scripts/collect_results.py --readme` run on the host, not inside
+the container - the Docker stack was verified for *serving*, not for regenerating the eval numbers.
 
 ---
 

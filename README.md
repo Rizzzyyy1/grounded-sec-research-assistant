@@ -309,7 +309,11 @@ With an Anthropic key (`ANTHROPIC_API_KEY` or `ant auth login`) the same command
 This has not been done on the machine this was built on - see [what is and isn't measured](#what-is-and-isnt-measured).
 
 **Docker** (API + UI + Qdrant server): `docker compose up --build` — see [docker-compose.yml](docker-compose.yml).
-Not run on the machine this was built on (no Docker); the files are validated statically in the test suite.
+Built and run live end to end (all three services healthy, UI opened in a browser, a real
+`/v1/query` answered through host Ollama, container→host reachability confirmed) — `make
+docker-smoke` reruns that same check. Not yet run: `finsight ingest`/`process`/`index` inside
+the container against the live corpus (verified only at a 200-chunk scale, ERROR_ANALYSIS.md 3h)
+and `--llm claude` in Docker (needs a real API key).
 
 ## Status
 
@@ -332,8 +336,8 @@ Not run on the machine this was built on (no Docker); the files are validated st
 | Measured with real data | Measured live, **free local model only** (`--llm ollama`) | Implemented and unit-tested, **not** run live |
 |---|---|---|
 | XBRL parsing vs 14 published figures; 0 unexplained gaps; identity holds in 278 periods | `ResearchAgent` tool loop: dev + test + the natural-phrasing probe, all vs the router (ERROR_ANALYSIS 3c) | `--llm claude` specifically; LLM judge; refusal-fallback request shape |
-| Section detection: 60/60 filings yield all core Items | 12-question manual smoke test across 5 categories (`scripts/smoke_test_agent.py`) | Docker images / compose stack |
-| API load test (no LLM), 785 hermetic tests, 6 import-linter contracts | `finsight serve --llm ollama` end to end: `/readyz`, a real `/v1/query`, and the Streamlit Ask page in a browser (ADR-0012) - not load-tested with an LLM in the loop |  |
+| Section detection: 60/60 filings yield all core Items | 12-question manual smoke test across 5 categories (`scripts/smoke_test_agent.py`) | `finsight ingest`/`process`/`index` run *inside* the Docker container against the real corpus (`finsight index` was smoke-tested to 200 chunks there, not the full 23,221, ERROR_ANALYSIS 3h) |
+| API load test (no LLM), 785 hermetic tests, 6 import-linter contracts | `finsight serve --llm ollama` end to end: `/readyz`, a real `/v1/query`, and the Streamlit Ask page in a browser (ADR-0012); **the full Docker Compose stack (`api`+`ui`+`qdrant`), also end to end, same way** (ERROR_ANALYSIS 3h) | `--llm claude` in Docker (needs a real API key); multi-worker/Qdrant-server scaling under load |
 | Retrieval ablations, header ablation, metadata-filter effect |  | Streaming beyond replayed trace events |
 | Tool router vs RAG, paired, on held-out companies |  | Human-verified gold set (`gold_v2`) |
 

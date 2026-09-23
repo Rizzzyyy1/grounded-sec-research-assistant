@@ -676,6 +676,132 @@ source, per this audit's explicit brief. If citation coverage needs to recover f
 next step is widening what counts as a *separately checkable claim* (bullet-level splitting) rather
 than loosening the overlap threshold back down into the ambiguous zone this audit found.
 
+## 3h. Docker, actually built and run for the first time
+
+Every prior mention of Docker in this project said the same thing: "files written and statically
+tested; not built or run (no Docker on the build machine)". Docker Desktop became available on the
+build machine mid-project; this section is that verification, done for real rather than assumed.
+
+### Method
+
+`docker compose config` (validate the resolved stack), then `docker compose up --build`, then a
+live `/v1/query` through the free local Ollama path (`FINSIGHT_LLM_PROVIDER=ollama`,
+`FINSIGHT_OLLAMA__BASE_URL=http://host.docker.internal:11434` - Docker Desktop's name for the host,
+set in `.env`, `.env` is gitignored so these are local-only). Both the API's HTTP surface (`curl`)
+and the Streamlit UI (driven in a real browser) were exercised, not just the container health
+checks. `data/` and `reports/` are bind-mounted from the host (`docker-compose.yml`), so the
+already-processed corpus (`chunks.parquet`, `facts.duckdb`, the BM25 index) was available to the
+container immediately - only the vector store needed anything new, because the compose stack's
+`qdrant` service is a fresh **server** container with its own empty named volume, not the host's
+embedded (local-mode) Qdrant directory the CLI otherwise uses (`stack.py::open_vector_store`
+resolves to a server when `FINSIGHT_QDRANT_URL` is set, embedded otherwise - the compose file sets
+it, so the two storage backends are never mixed, but also never share data automatically).
+
+### Two real bugs found, both fixed
+
+* **Host port collision, not a FinSight bug but a real first-run failure.** `docker compose up
+  --build` failed outright: `Bind for 0.0.0.0:8000 failed: port is already allocated`. `docker ps`
+  showed an entirely unrelated project (`gridcast`) already bound to 8000 and 8501 on this same
+  machine - `docker-compose.yml` hardcoded those same ports with no way to move just one service
+  without editing the file. **Fix:** `${FINSIGHT_API_PORT:-8000}` / `${FINSIGHT_QDRANT_PORT:-6333}`
+  / `${FINSIGHT_UI_PORT:-8501}` in `docker-compose.yml`'s port mappings, defaults unchanged so a
+  clean clone with no collision behaves exactly as before; documented in `.env.example`. This
+  session's own `.env` sets `FINSIGHT_API_PORT=8010` / `FINSIGHT_UI_PORT=8511` to avoid the local
+  `gridcast` clash - a machine-specific choice, not the new project default.
+* **Qdrant client/server version drift.** Every request to the qdrant server logged: *"Qdrant
+  client version 1.19.1 is incompatible with server version 1.12.4. Major versions should match and
+  minor version difference must not exceed 1."* `pyproject.toml` pinned `qdrant-client>=1.9` with
+  no ceiling, so a fresh `pip install` always resolves to whatever is newest - currently seven minor
+  versions ahead of the `qdrant/qdrant:v1.12.4` image pinned in `docker-compose.yml`. It happened to
+  keep working for the basic calls exercised here (collection create, upsert, search), which is
+  exactly the kind of "works today, breaks on the next dependency bump" risk this project's own
+  `CLAUDE.md` warns about elsewhere. **Fix:** `qdrant-client>=1.9,<1.13` - resolves to `1.12.2`
+  against this image, warning gone, reverified live (rebuilt the `api` image, re-ran the same query,
+  identical correct answer). The two versions (client ceiling, server image tag) must move together
+  from here; the fix comments say so.
+
+### What was verified live, end to end
+
+* All three services reach a healthy `docker compose ps` state with zero restarts: `qdrant` (no
+  healthcheck defined, none needed - `api` cannot start serving without it), `api`
+  (`/healthz` → `{"status":"ok"}`, `/readyz` → `status: ready`, `index_chunks: 23221`,
+  `companies_with_facts: 12`, `llm_provider: "ollama (llama3.2:3b)"`), `ui` (Streamlit's own
+  `/_stcore/health`).
+* **Container → host Ollama reachability**, the specific thing this stack's own header comment
+  flagged as "untested": `docker compose exec api finsight doctor` reports `Ollama (llama3.2:3b):
+  ok, reachable, 'llama3.2:3b' pulled` from *inside* the container, and a direct
+  `urllib.request.urlopen('http://host.docker.internal:11434/api/version')` from inside the
+  container succeeds. This is the project's own diagnostic tool, run where it had never run before.
+* **A numeric query end to end**: "What was Apple's revenue in fiscal 2024?" via `curl` to
+  `/v1/query` → `"$391,035 million. [S1]"`, one `get_financial_metric` tool call, citation resolves,
+  zero warnings, `cost_usd: 0.0`. Pure XBRL/DuckDB path - no vector search involved.
+* **A qualitative (retrieval) query end to end**: "What does Apple say about supply chain risk?" →
+  a six-citation answer, all resolving to real passages with real quotes. The containerized vector
+  store started with **zero points** (a fresh named volume, confirmed via `points_count: 0` on the
+  collection right after startup), so this specific answer came entirely through the sparse (BM25)
+  half of hybrid retrieval, loaded straight from the bind-mounted `data/indexes/bm25` - a genuine,
+  correct answer, but not proof the *dense* half works in this deployment.
+* **Dense retrieval specifically**, checked separately because of the point above: ran `finsight
+  index --limit 200 --index-dir /app/data/_docker_verify_index` inside a one-off `docker compose
+  run` container - `--index-dir` keeps the rebuilt BM25/manifest in a throwaway path so the host's
+  real `data/indexes/` is never touched, while the vector *target* is controlled independently by
+  `FINSIGHT_QDRANT_URL` and lands in the real, already-running server regardless. 200 AAPL chunks
+  embedded (~2.3 chunks/s on this machine's CPU via `fastembed`'s ONNX runtime) and confirmed
+  present (`points_count: 200`). A direct `store.search()` call with a real query embedding
+  ("Apple supply chain risk outsourcing partners") returned five hits, scores 0.76-0.84, real chunk
+  ids - dense search genuinely works against the containerized server, not just the sparse fallback.
+  The throwaway directory was deleted after; the 200 real vectors were left in the named volume
+  (harmless, not "test pollution" - they are genuine embeddings of real filing text).
+* **The UI**, opened in a real browser (not just its health check): the home page, the Ask page
+  (which independently confirmed `llm_provider: ollama (llama3.2:3b)` by rendering it), a submitted
+  question, and a rendered answer with tool trace, latency, tokens and cost - including a live
+  instance of the *existing* `repair_citations` safety net catching a model-invented `[S1]` on one
+  UI-submitted query and correctly downgrading it to `[unverified]` rather than showing it as real -
+  the same documented local-model quirk from §3c/LIMITATIONS.md, now also confirmed to behave
+  correctly through the containerized path, not just the CLI/native one.
+* **A focused, rerunnable check**: `docker/smoke_test.sh` (`make docker-smoke`) - validates config,
+  builds, waits for `/readyz`, confirms `llm_provider` is Ollama, asks one real question, fails
+  loudly on any of those. Caught its own bug while being written: an early version read
+  `FINSIGHT_API_PORT` from the calling shell's environment rather than `.env` (the same file
+  `docker compose` itself reads), so without the fix it silently queried whatever unrelated service
+  happened to already be listening on the hardcoded default port (the `gridcast` clash above) - now
+  sources `.env` the same way Compose resolves it before picking the port to check.
+
+### What remains unverified, and why
+
+* **Full-corpus indexing inside the container** (`finsight index`, all 23,221 chunks). Only
+  smoke-tested at 200 chunks (~90s including the one-time embedding-model download). At the
+  measured ~2.3 chunks/s this machine's CPU manages through `fastembed`'s ONNX runtime, the full
+  corpus would take roughly 2.5-3 hours - correctly out of scope for a verification pass, and
+  already flagged as slow in the compose file's own header comment. `finsight ingest`/`process`
+  inside the container (vs. on the host, as done for every prior run this project) are unrun for
+  the same reason - no need to re-download and re-parse 60 filings just to prove the container can
+  do what the host already did.
+* **`--llm claude` in Docker.** No `ANTHROPIC_API_KEY` on this machine (unchanged from every other
+  section of this project); only the free Ollama path could be exercised.
+* **Load / concurrency under Docker.** `reports/load_test.md` measured the API on the host with no
+  LLM in the loop; this session's Docker checks are single-request, not a load test. Multi-worker
+  scaling would need the Qdrant *server* (already true here) plus multiple `uvicorn` workers sharing
+  one DuckDB connection - `docs/LIMITATIONS.md`'s existing scale caveat, unchanged by this session.
+* **A from-scratch clone.** This ran against a working tree with `data/` and `reports/` already
+  populated from many prior sessions' runs - the bind-mount path was verified, not the
+  `docker compose run --rm api finsight ingest && ... process && ... index` first-run path a truly
+  empty clone would need. The compose file's header comment already documents that sequence; it was
+  not executed end to end here.
+* **Containers were stopped, not torn down**, at the end of this session (`docker compose stop`,
+  not `down`), and the named volume (`qdrant_data`, now holding the 200 real vectors above) was
+  never deleted - per the explicit instruction to preserve data. `docker compose up -d` picks the
+  stack back up without rebuilding or re-downloading anything.
+
+### Recommendation
+
+Docker is a genuinely working deployment path for the free local model, not just a plausible-looking
+set of files. Two real, fixed bugs (a hardcoded port that collides with unrelated local software, a
+drifting client/server version pin) were exactly the kind of thing static file review cannot catch -
+both needed an actual `docker compose up` to surface. `make docker-smoke` is the one command that
+reruns everything checked live in this section; run it again before ever claiming Docker "works" in
+the future; do not re-assert that claim from the compose file alone.
+
 ## 4. Design changes forced by evidence
 
 * **Reranker is opt-in** (ablation A1: better ordering, no recall gain, ~16× latency) — ADR-0002 amended.
