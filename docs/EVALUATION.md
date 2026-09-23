@@ -112,6 +112,12 @@ every record.
 
 ### 2.2 `gold_v2_draft`: a natural-phrasing probe (not a gold set)
 
+The draft was edited on 2026-09-23 to clarify ambiguous financial questions and remove three
+overly broad retrieval labels; details are in `docs/BENCHMARK_REVIEW_DECISIONS.md`. Published
+natural-probe scores and retrieval counts came from the **earlier file** and are historical. They
+must not be read as results for the revised draft. Human label review will not restore blind
+holdout status to either version; see `docs/DATASET_INTEGRITY.md`.
+
 `data/eval/gold_v2_draft.jsonl` (built by `scripts/make_gold_v2_draft.py`, 38 questions, provenance
 `draft`) rewrites question families in natural wording. Numeric expectations still come from the
 XBRL store; the gold *sections* for text questions are unverified drafting judgement, and the file
@@ -122,7 +128,7 @@ templated questions could not reveal. The post-fix re-run is **in-sample** becau
 from these questions; the pre-fix column is a historical measurement before those fixes. Human label review cannot
 undo development exposure; future evaluations on this file remain in-sample.
 
-Turning this into `gold_v2` needs a human to verify every label - see
+Improving the labels needs a reviewer to verify every row - see
 [GOLD_V2_REVIEW_CHECKLIST.md](GOLD_V2_REVIEW_CHECKLIST.md) for the exact procedure,
 `reports/gold_v2_review_worksheet.md` for the blank row-by-row worksheet to fill in, and
 `reports/gold_v2_draft_review.md` for a prepared review pass (every numeric value independently

@@ -1,5 +1,12 @@
 # `gold_v2_draft.jsonl` — row-by-row review (prepared for human judgment, not self-approved)
 
+> **Historical snapshot:** this report was prepared against the earlier draft. On 2026-09-23,
+> `nat-num-008`, `nat-ratio-009`, `nat-ratio-011`, and `nat-txt-038` were reworded;
+> `nat-txt-028`, `034`, and `036` had imprecise `gold_sources` removed from retrieval scoring;
+> and Exxon Item 1 was removed from `nat-txt-031` pending evidence. The values and prior
+> retrieval counts below describe the earlier file. See
+> [the decision log](../docs/BENCHMARK_REVIEW_DECISIONS.md) for the current status.
+
 **This document reports what was checked and what was found. It does not mark any label
 "correct" — every verdict is yours to make.** See `docs/GOLD_V2_REVIEW_CHECKLIST.md` for the full
 procedure this review follows; `docs/DATASET_INTEGRITY.md` for why this file cannot be treated as

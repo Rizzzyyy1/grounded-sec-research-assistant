@@ -12,11 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from finsight.config.universe import Universe
+from finsight.config.universe import CompanySpec, Universe
 from finsight.core.exceptions import FinSightError, IngestionError
 from finsight.core.logging import get_logger
 from finsight.ingestion.edgar.downloader import download_filing
-from finsight.ingestion.edgar.filings import list_filings
+from finsight.ingestion.edgar.filings import find_filings_by_accession, list_filings
 from finsight.ingestion.xbrl.facts import parse_company_facts
 from finsight.ingestion.xbrl.store import FactStore
 
@@ -41,11 +41,49 @@ class IngestionReport:
     filings_downloaded: int = 0
     filings_skipped: int = 0
     facts_loaded: dict[str, int] = field(default_factory=dict)
+    fact_source_filings_catalogued: int = 0
+    fact_source_accessions_unresolved: dict[str, list[str]] = field(default_factory=dict)
     failures: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return not self.failures
+
+
+def _catalogue_fact_sources(
+    client: IngestClient,
+    store: FactStore,
+    company: CompanySpec,
+    cik: str,
+    report: IngestionReport,
+) -> None:
+    """Add verified SEC metadata for the exact filings selected facts came from."""
+    missing = store.uncatalogued_fact_accessions(company.ticker)
+    if not missing:
+        return
+    try:
+        source_refs = find_filings_by_accession(
+            client,
+            company.ticker,
+            fiscal_year_end=company.fiscal_year_end,
+            accessions=missing,
+            cik=cik,
+        )
+    except FinSightError as exc:
+        report.fact_source_accessions_unresolved[company.ticker] = sorted(missing)
+        log.warning("ingest.fact_source_lookup_failed", ticker=company.ticker, error=str(exc))
+        return
+    for ref in source_refs:
+        store.upsert_filing(ref)
+    report.fact_source_filings_catalogued += len(source_refs)
+    unresolved = sorted(missing - {ref.accession for ref in source_refs})
+    if unresolved:
+        report.fact_source_accessions_unresolved[company.ticker] = unresolved
+        log.warning(
+            "ingest.fact_source_unresolved",
+            ticker=company.ticker,
+            accessions=unresolved,
+        )
 
 
 def run_ingestion(
@@ -129,6 +167,7 @@ def run_ingestion(
                 )
                 store.replace_company_facts(company.ticker, parsed)
                 report.facts_loaded[company.ticker] = len(parsed.facts)
+                _catalogue_fact_sources(client, store, company, cik, report)
             except (FinSightError, ValueError) as exc:
                 report.failures.append((company.ticker, f"facts: {exc}"))
                 log.error(

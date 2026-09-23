@@ -223,6 +223,15 @@ def ingest(
         f"facts loaded for {len(report.facts_loaded)} companies "
         f"({sum(report.facts_loaded.values())} facts)"
     )
+    console.print(
+        f"fact-source filings catalogued: {report.fact_source_filings_catalogued}; "
+        f"unresolved source accessions: "
+        f"{sum(map(len, report.fact_source_accessions_unresolved.values()))}"
+    )
+    for ticker, accessions in report.fact_source_accessions_unresolved.items():
+        console.print(
+            f"[yellow]missing source metadata[/] {escape(ticker)}: {escape(', '.join(accessions))}"
+        )
     for where, message in report.failures:
         console.print(f"[red]failed[/] {escape(where)}: {escape(message)}")
     if not report.ok:

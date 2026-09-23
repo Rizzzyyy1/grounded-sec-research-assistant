@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from datetime import date
+from itertools import chain
 from typing import Any, Protocol
 
 from finsight.config.universe import Universe
@@ -160,3 +161,52 @@ def list_universe_filings(source: EdgarSource, universe: Universe) -> dict[str, 
         )
         for company in universe.companies
     }
+
+
+def find_filings_by_accession(
+    source: EdgarSource,
+    ticker: str,
+    *,
+    fiscal_year_end: str,
+    accessions: Iterable[str],
+    cik: str | None = None,
+) -> list[FilingRef]:
+    """Resolve exact source filings for selected XBRL facts, including later comparatives.
+
+    The normal filing list keeps one document per fiscal period for downloading. A selected
+    historical fact can instead come from a newer filing's comparative column, so its accession
+    must be looked up without period de-duplication or a universe-year filter.
+    """
+    wanted = set(accessions)
+    if not wanted:
+        return []
+    cik = pad_cik(cik or source.ticker_to_cik(ticker))
+    submissions = source.get_submissions(cik)
+    company = str(submissions.get("name", ticker))
+    # The accession embeds its filing year. Older pages cannot contain a matching accession
+    # if their newest filing predates the earliest requested filing year.
+    years = [2000 + int(a[11:13]) for a in wanted if len(a) >= 13 and a[11:13].isdigit()]
+    min_filed_year = min(years) if len(years) == len(wanted) else None
+    tables = chain(
+        (submissions.get("filings", {}).get("recent", {}),),
+        (source.get_submissions_page(name) for name in _older_pages(submissions, min_filed_year)),
+    )
+    found: dict[str, FilingRef] = {}
+    for table in tables:
+        for row in _rows(table):
+            accession = row.get("accessionNumber")
+            if accession not in wanted:
+                continue
+            ref = _to_ref(
+                row,
+                cik=cik,
+                ticker=ticker,
+                company=company,
+                fiscal_year_end=fiscal_year_end,
+                wanted=frozenset(f.value for f in SUPPORTED_FORMS),
+            )
+            if ref is not None:
+                found[ref.accession] = ref
+        if found.keys() >= wanted:
+            break
+    return [found[accession] for accession in sorted(found)]

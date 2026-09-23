@@ -40,6 +40,10 @@ Raw per-run files in `reports/runs/` are not included in this public repository,
 cannot independently recompute all tables or paired statistics. The prose summarizes recorded runs. The gold set is **automatically derived** (numeric answers
 come from the same XBRL store used by the tools; they are *not* independently human-verified) — [read the caveats](docs/EVALUATION.md#21-what-gold_v1-actually-is).
 
+> **Dataset revision:** the natural-probe figures below are historical results from the earlier
+> `gold_v2_draft` wording and source labels. The draft was revised on 2026-09-23; these figures
+> are not scores for the revised file. See the [decision log](docs/BENCHMARK_REVIEW_DECISIONS.md).
+
 <!-- RESULTS:START -->
 ### End-to-end accuracy on `gold_v1` (rule-based: numbers, names, abstention)
 

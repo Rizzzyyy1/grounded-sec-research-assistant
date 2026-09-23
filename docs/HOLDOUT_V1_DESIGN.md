@@ -1,7 +1,13 @@
 # `holdout_v1_draft.jsonl` — a genuinely fresh holdout, and how to keep it that way
 
 **Do not run `finsight ask`, `finsight eval run`, or any agent/router invocation against this file
-before its labels are reviewed.** Every value in it was computed directly from the XBRL fact store
+before its labels are reviewed.** Two definitions need a reviewer decision before freezing:
+`hv1-ratio-009` uses **long-term debt / shareholders' equity**, so either specify long-term debt
+in the question or change the formula and expected value; `hv1-ratio-010` uses revenue divided by
+**average** current and prior-year assets, which should be explicit in the question or scoring
+notes. These are review flags, not approved edits to the holdout file.
+
+Every value in it was computed directly from the XBRL fact store
 and the indexed chunk list - the same read-only tooling `scripts/verify_gold_v2_draft.py` uses -
 never by asking the system under test what it thinks the answer is. See "How the labels were
 produced" below for exactly what was and wasn't run to build this file.

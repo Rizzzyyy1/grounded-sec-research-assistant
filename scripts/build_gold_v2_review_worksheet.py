@@ -28,6 +28,8 @@ def verify_hint(row: object) -> str:  # type: ignore[valid-type]
     if row.expected.numeric:  # type: ignore[attr-defined]
         q = row.question.replace('"', "'")  # type: ignore[attr-defined]
         return f'`finsight ask "{q}" --llm extractive --system router` and compare to the 10-K (checklist §1).'
+    if row.type.value == "qualitative":  # type: ignore[attr-defined]
+        return "Source label pending: locate the exact supporting filing passage before retrieval scoring."
     return "Read the question against the checklist's general row checks (checklist §4)."
 
 
@@ -52,6 +54,8 @@ def main() -> None:
             expected = f"{r.expected.numeric.value:,.0f} {r.expected.numeric.unit}"
         elif r.gold_sources:
             expected = ", ".join(f"{g.ticker} FY{g.fiscal_year} It{g.item}" for g in r.gold_sources)
+        elif r.type.value == "qualitative":
+            expected = "source label pending"
         else:
             expected = "-"
         q = r.question.replace("|", "\\|")

@@ -49,7 +49,7 @@ flows."*
 
 | Claim sentence | Attached to | Full source passage (verbatim) | Suggested verdict |
 |---|---|---|---|
-| "These cost pressures can have an adverse impact on the company's business, financial condition, results of operations, or cash flows." | S2 | "BUSINESS OPERATIONS RISKS\n\n...The loss or disruption of such manufacturing and supply arrangements, including for issues such as labor disputes or controversies, loss or impairment of key manufacturing sites, discontinuity or disruptions in our internal information and data systems or those of our suppliers, cybersecurity incidents, inability to procure sufficient raw or input materials..., significant changes in trade policy, natural disasters,... have at times interrupted and could, in the future, interrupt product supply and, if not effectively managed and remedied, could have an adverse impact on our business, financial condition, results of operations or cash flows." | **Ambiguous — your call.** The cited sentence's own words match S2's closing clause almost verbatim, and S2 does list the same seven pressures the bullets name. But the *cited sentence itself* is generic risk-factor boilerplate ("adverse impact on business, financial condition, results of operations, or cash flows" is standard SEC risk-factor language that would lexically match countless unrelated risk paragraphs). The seven specific bullet items above it are **not themselves bracketed** — only this generic trailing sentence is. Ask: does citing S2 for *this specific sentence* meaningfully support the claim, or would almost any risk-factor passage in the filing have scored similarly? |
+| "These cost pressures can have an adverse impact on the company's business, financial condition, results of operations, or cash flows." | S2 | "BUSINESS OPERATIONS RISKS\n\n...The loss or disruption of such manufacturing and supply arrangements, including for issues such as labor disputes or controversies, loss or impairment of key manufacturing sites, discontinuity or disruptions in our internal information and data systems or those of our suppliers, cybersecurity incidents, inability to procure sufficient raw or input materials..., significant changes in trade policy, natural disasters,... have at times interrupted and could, in the future, interrupt product supply and, if not effectively managed and remedied, could have an adverse impact on our business, financial condition, results of operations or cash flows." | **Limited support.** S2 supports the narrow adverse-impact sentence and lists operational disruptions. It does not rank these as the company's **biggest cost pressures**. The uncited bullets need claim-level support. The draft question has been reworded to ask about operational and supply-chain risks; this historical run remains tied to the old wording. |
 
 ### 3. J&J talc litigation — 4 sentences, all auto-attached (a different live run than §3g's original audit)
 
@@ -100,30 +100,25 @@ just this single instrumented run).
 | S5 | *Diaz v. Tesla* verdict details ($136.9M, Fremont Factory 2015–2016, "will pursue next steps, including an appeal") **and** the DFEH Notice of Cause Finding | **Bullets 2 and 3** — both, exact match |
 | S6 | "...two Tesla stockholders filed separate derivative actions in the U.S. District Court for the Western District of Texas... breach of fiduciary duty, unjust enrichment, and violation of the federal securities laws in connection with alleged race and gender discrimination and sexual harassment." | **Bullet 4** — exact match |
 
-**Suggested verdict: supports, with a precision caveat worth your judgment.** Every one of the four
-bullets has a real, precisely matching source among S4/S5/S6 — nothing here is fabricated or
-off-topic. But S1/S2/S3 are three redundant, non-specific citations riding along in the same
-bracket group; they don't support any *particular* bullet, they're just generally
-litigation-adjacent. This isn't a false citation (nothing it points to contradicts or misdescribes
-the claims), but it is citation-group imprecision: a reader clicking S1 expecting to verify a
-specific bullet would find generic material instead. Whether that's acceptable "the model cited
-broadly and correctly, just imprecisely" behavior, or something worth a future fix (e.g. penalizing
-or splitting an unnecessarily large citation group), is your call.
+**Claim-level verdict:** S4 supports bullet 1, S5 supports bullets 2–3, and S6 supports bullet 4.
+S1/S2/S3 support none of the four claims, so those three citations fail claim-level precision even
+though their URLs resolve and they discuss litigation generally. The historical answer should
+not be presented as six supporting citations. A future answer should put S4/S5/S6 beside the
+respective bullets; this review does not tune the model against this already-used question.
 
 ## Summary for your review
 
 * **8 auto-attached citation instances audited** (JPMorgan ×3, P&G ×1, J&J ×4), spanning 2
-  different live runs on 3 different companies: **7 of 8 are clear, strong verbatim-or-near-verbatim
-  matches**; **1 (P&G) is a plausible-but-generic boilerplate match** flagged above for your
-  specific judgment on whether generic risk-factor language should count as "supported."
+  different live runs on 3 different companies: **7 of 8 are strong claim-specific matches**;
+  P&G's one is supported only as a narrow adverse-impact statement, not as an answer to the
+  historical "biggest cost pressures" wording.
 * **6 model-written citation instances audited** (Tesla, one blanket group): **3 of 6 (S4/S5/S6)
-  are precise, exact matches to specific bullets; 3 of 6 (S1/S2/S3) are topically-adjacent but not
-  claim-specific** — not false, but imprecise, and flagged for your judgment on whether that's
-  acceptable.
+  support specific bullets; 3 of 6 (S1/S2/S3) do not support any bullet**.
 * **This is a small, hand-audited sample** (2 questions instrumented this session for
   auto-attachment provenance, 1 for model-written), not a statistically powered study — it is
   consistent with, and adds fresh evidence to, `ERROR_ANALYSIS.md` §3g's earlier finding that the
   tightened mechanism's remaining auto-attachments tend to be genuine, with the P&G case a useful
   concrete instance of the "generic boilerplate" risk that fix's own commentary already anticipated
   as a residual limitation.
-* **Nothing above is a final verdict.** Two specific items need your judgment: the P&G generic-language question, and the Tesla citation-group-precision question.
+* These are evidence-based editorial decisions for the reviewed examples, not a population-level
+  precision estimate or human certification of the full dataset.

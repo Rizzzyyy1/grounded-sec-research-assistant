@@ -2,6 +2,7 @@
 
 **This document tells you what to check and how. It does not check anything itself, and nothing
 in this repository marks a label "verified" on its own — that is a judgment only you can make.**
+Review improves labels, but cannot make these repeatedly used questions an untouched holdout.
 Claude prepared the worksheet and the verification commands below; Claude has not approved any
 label, and should not be treated as having done so.
 
@@ -9,13 +10,13 @@ label, and should not be treated as having done so.
 
 `data/eval/gold_v2_draft.jsonl` (38 questions, `provenance="draft"` on every row) rewrites parts
 of `gold_v1` in natural phrasing to test whether the system's measured performance survives
-questions that were not templated. Numeric answers are correct by construction (computed from the
-same XBRL fact store the tools read), but the *sections* named for qualitative questions are one
+questions that were not templated. Numeric answers were computed from the same XBRL fact store
+the tools read, so they still need independent filing checks. The *sections* named for qualitative questions are one
 person's judgement, made without a second reviewer, and never checked against the actual filing
-text. Until a human works through every row, this file stays a **probe**, not a **gold set** — see
+text. Even after human review, this remains an **in-sample probe**, not a blind holdout — see
 [EVALUATION.md §2.2](EVALUATION.md#22-gold_v2_draft-a-natural-phrasing-probe-not-a-gold-set) and
-[ERROR_ANALYSIS.md §3b](ERROR_ANALYSIS.md). The work below is what turns it into `gold_v2`: a
-holdout worth trusting.
+[ERROR_ANALYSIS.md §3b](ERROR_ANALYSIS.md). The work below improves the labels; it cannot undo
+the fact that this file's failures were used to develop the system.
 
 **Start here:** `reports/gold_v2_draft_review.md` - a prepared pass through every row (every
 numeric/ratio value independently recomputed from the fact store with its exact accession and
@@ -25,7 +26,7 @@ do the actual judgment calls. Then `reports/gold_v2_review_worksheet.md` (regene
 `.venv/bin/python scripts/build_gold_v2_review_worksheet.py` if the draft file changes) for the
 blank verdict/notes columns to fill in as you go.
 
-## 1. Numeric questions (23 of 38: `numeric`, `computed_metric`, `trend`, `comparison`, and the one
+## 1. Numeric questions (17 of 38: `numeric`, `computed_metric`, `trend`, `comparison`, and the one
    `numeric` row with an injection prefix)
 
 For each row:
@@ -127,13 +128,11 @@ Once you've worked through a row:
   `data/eval/gold_v2_draft.jsonl` directly (it's plain JSONL - one `GoldExample` per line, schema in
   `src/finsight/evaluation/datasets.py`), then re-run
   `.venv/bin/python scripts/build_gold_v2_review_worksheet.py` to refresh the worksheet.
-* When every row is verified: bump `provenance` from `"draft"` to `"human"` for the rows you
-  checked, rename the file to `data/eval/gold_v2.jsonl`, and update `docs/EVALUATION.md §2.2` and
-  this file's own status line to say so. Re-run the evaluations that used the draft file
-  (`agent-ollama-natural`, `router-natural-refresh`, `rag-extractive-natural-refresh` in
-  `reports/runs/`) against the verified file and report the new numbers as an in-sample evaluation with reviewed labels. Label review
-  does not undo development exposure or turn this set into a clean holdout. Use the separately
-  proposed `holdout_v1_draft` only after the review described in `HOLDOUT_V1_DESIGN.md`.
+* When every row is reviewed, preserve the original draft and historical runs. Version the
+  corrected file, record every changed label or question, and distinguish any new scores from
+  historical scores. `provenance="human"` can describe label review, but **not blind holdout
+  status**. A first out-of-sample result requires a separately reviewed, frozen set that the
+  agent has never been run against (`docs/HOLDOUT_V1_DESIGN.md`).
 
 ## What this checklist is not
 

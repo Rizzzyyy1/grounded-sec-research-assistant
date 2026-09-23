@@ -8,7 +8,11 @@ import pytest
 
 from finsight.config.universe import Universe
 from finsight.core.schemas import FiscalPeriod, FormType
-from finsight.ingestion.edgar.filings import list_filings, list_universe_filings
+from finsight.ingestion.edgar.filings import (
+    find_filings_by_accession,
+    list_filings,
+    list_universe_filings,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -140,6 +144,29 @@ def test_duplicate_period_keeps_latest_filing() -> None:
     )
     refs = list_filings(FakeSource(recent), "AAPL", fiscal_year_end="09-30")
     assert [r.accession for r in refs] == [f"{CIK}-24-000002"]
+
+
+def test_exact_fact_accession_keeps_comparative_filing_outside_universe_years() -> None:
+    recent = table(
+        row("10-K", "2024-09-28", "2024-11-01", 1),
+        row("10-K", "2025-09-27", "2025-11-01", 2),
+    )
+    requested = f"{CIK}-25-000002"
+    refs = find_filings_by_accession(
+        FakeSource(recent), "AAPL", fiscal_year_end="09-30", accessions={requested}
+    )
+    assert [r.accession for r in refs] == [requested]
+    assert refs[0].fiscal_year == 2025
+
+
+def test_exact_fact_accession_does_not_invent_missing_filing() -> None:
+    refs = find_filings_by_accession(
+        FakeSource(APPLE_10KS),
+        "AAPL",
+        fiscal_year_end="09-30",
+        accessions={f"{CIK}-26-999999"},
+    )
+    assert refs == []
 
 
 def test_rows_without_dates_are_skipped_not_fatal() -> None:

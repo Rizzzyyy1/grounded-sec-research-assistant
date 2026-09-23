@@ -212,6 +212,16 @@ class FactStore:
         ).fetchone()
         return row[0] if row else None
 
+    def uncatalogued_fact_accessions(self, ticker: str) -> set[str]:
+        """Selected facts whose exact source filing has no catalogue row."""
+        rows = self._con.execute(
+            "SELECT DISTINCT f.accession FROM facts f "
+            "LEFT JOIN filings d ON f.accession = d.accession "
+            "WHERE f.ticker = ? AND d.accession IS NULL",
+            [ticker.upper()],
+        ).fetchall()
+        return {str(row[0]) for row in rows}
+
     def tickers(self) -> list[str]:
         return list(self.sql("SELECT DISTINCT ticker FROM facts ORDER BY 1")["ticker"])
 

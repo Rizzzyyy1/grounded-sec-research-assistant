@@ -183,3 +183,29 @@ def test_progress_callback_receives_messages(tmp_path: Path) -> None:
         run(FakeClient(), tmp_path, store, on_progress=seen.append)
     assert any("AAA" in m for m in seen)
     assert any("downloaded" in m for m in seen)
+
+
+def test_facts_only_catalogues_exact_later_source_accession(tmp_path: Path) -> None:
+    class ComparativeClient(FakeClient):
+        def get_company_facts(self, cik: str) -> dict[str, Any]:
+            facts = _facts(int(cik))
+            facts["facts"]["us-gaap"]["Revenues"]["units"]["USD"][0]["accn"] = f"{cik}-25-000001"
+            return facts
+
+        def get_submissions(self, cik: str) -> dict[str, Any]:
+            submissions = _submissions(cik, f"Co {cik}", 2)
+            recent = submissions["filings"]["recent"]
+            recent["accessionNumber"].append(f"{cik}-25-000001")
+            recent["form"].append("10-K")
+            recent["reportDate"].append("2025-09-27")
+            recent["filingDate"].append("2025-11-01")
+            recent["primaryDocument"].append("comparative.htm")
+            return submissions
+
+    with FactStore() as store:
+        report = run(ComparativeClient(), tmp_path, store, download=False)
+        assert report.ok
+        assert report.fact_source_filings_catalogued == 2
+        assert store.filing_url("0000000001-25-000001") == (
+            "https://www.sec.gov/Archives/edgar/data/1/000000000125000001/comparative.htm"
+        )
