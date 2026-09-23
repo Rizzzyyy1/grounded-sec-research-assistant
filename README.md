@@ -321,6 +321,15 @@ docker-smoke` reruns that same check. Not yet run: `finsight ingest`/`process`/`
 the container against the live corpus (verified only at a 200-chunk scale, ERROR_ANALYSIS.md 3h)
 and `--llm claude` in Docker (needs a real API key).
 
+For a Docker demo, check `docker compose ps` before opening the UI: the `finsight-ui-1`
+container's published host port is the one to use. The default is
+`http://127.0.0.1:8501/Ask`. If `.env` assigns `FINSIGHT_UI_PORT=8511` and
+`FINSIGHT_API_PORT=8010`, use `http://127.0.0.1:8511/Ask` and
+`http://127.0.0.1:8010/readyz` instead.
+Another project may own the defaults; a response on port 8501 or 8000 alone does not
+verify that FinSight is running. The FinSight readiness response includes
+`index_chunks` and `llm_provider`.
+
 ## Status
 
 | Phase | Theme | Status |
