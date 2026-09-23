@@ -61,7 +61,10 @@ investment advice**. The author is not a registered investment adviser.
   The router's rules were developed against the same phrasing, so its 0.94 is optimistic. The LLM agent
   (free local model) scores statistically indistinguishably from the router on the same natural-phrasing
   probe (paired diff -0.038, CI crosses zero) - it does not (yet, at this model size) close the gap either.
-* **The test split has been inspected** during error analysis and is no longer a clean holdout.
+* **The test split has been inspected** during error analysis and is no longer a clean holdout;
+  `gold_v2_draft` is fully in-sample, entirely - see `docs/DATASET_INTEGRITY.md` for the full,
+  row-referenced account of what's been touched and why, and `docs/HOLDOUT_V1_DESIGN.md` for the
+  fresh 20-question set built specifically to avoid that problem.
 * **Not validated live:** the Claude agent specifically (`--llm claude`, no API key available), the LLM
   judge, the refusal-fallback request shape. The agent *has* been run live against a free
   local model (`--llm ollama`, ADR-0011) - see [RESULTS](../reports/RESULTS.md) and ERROR_ANALYSIS 3c -

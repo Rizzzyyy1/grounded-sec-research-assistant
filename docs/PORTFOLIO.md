@@ -176,7 +176,14 @@ Nothing here can be done without your accounts, machine or judgement:
    a real bug found only by watching the actual workflow run (an ANSI-color rendering quirk in a
    `--help`-output test, not reproducible from local checks alone) - full story in
    ERROR_ANALYSIS.md §3i.
-3. **Human-verify `gold_v2`** (`data/eval/gold_v2_draft.jsonl`): this is what turns the probes into a clean holdout. Procedure and worksheet: `docs/GOLD_V2_REVIEW_CHECKLIST.md` / `reports/gold_v2_review_worksheet.md` - prepared, not completed; no label has been approved.
+3. **Human-verify `gold_v2`** (`data/eval/gold_v2_draft.jsonl`): this is what turns the probe into a
+   clean holdout - it currently cannot be, since it's fully in-sample (`docs/DATASET_INTEGRITY.md`).
+   Procedure, worksheet, and a prepared review pass (every value independently recomputed, findings
+   flagged): `docs/GOLD_V2_REVIEW_CHECKLIST.md` / `reports/gold_v2_review_worksheet.md` /
+   `reports/gold_v2_draft_review.md` - prepared, not completed; no label has been approved.
+   **Also review `data/eval/holdout_v1_draft.jsonl`** (`docs/HOLDOUT_V1_DESIGN.md`) - a fresh
+   20-question set built to avoid the wording/answers already used to develop fixes; not yet run
+   against the agent and must not be, before its labels are reviewed.
 4. ~~Build the Docker image (`docker compose up`) on a machine with Docker; fix whatever breaks~~
    **Done**: built and run live end to end (three healthy containers, UI opened in a browser, a
    real query answered through host Ollama, container→host reachability confirmed) once Docker

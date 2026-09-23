@@ -17,9 +17,13 @@ text. Until a human works through every row, this file stays a **probe**, not a 
 [ERROR_ANALYSIS.md §3b](ERROR_ANALYSIS.md). The work below is what turns it into `gold_v2`: a
 holdout worth trusting.
 
-**Start here:** `reports/gold_v2_review_worksheet.md` (regenerate with
-`.venv/bin/python scripts/build_gold_v2_review_worksheet.py` if the draft file changes) — one row
-per question, with a suggested check and blank columns for your verdict and notes.
+**Start here:** `reports/gold_v2_draft_review.md` - a prepared pass through every row (every
+numeric/ratio value independently recomputed from the fact store with its exact accession and
+filing URL, every qualitative section's chunk count and opening text, every abstention checked
+against objective criteria, uncertain items flagged) to save you the mechanical legwork before you
+do the actual judgment calls. Then `reports/gold_v2_review_worksheet.md` (regenerate with
+`.venv/bin/python scripts/build_gold_v2_review_worksheet.py` if the draft file changes) for the
+blank verdict/notes columns to fill in as you go.
 
 ## 1. Numeric questions (23 of 38: `numeric`, `computed_metric`, `trend`, `comparison`, and the one
    `numeric` row with an injection prefix)

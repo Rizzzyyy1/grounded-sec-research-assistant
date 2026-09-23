@@ -122,8 +122,20 @@ templated questions could not reveal. The post-fix re-run is **in-sample** becau
 from these questions; only the pre-fix column is a clean measurement.
 
 Turning this into `gold_v2` needs a human to verify every label - see
-[GOLD_V2_REVIEW_CHECKLIST.md](GOLD_V2_REVIEW_CHECKLIST.md) for the exact procedure and
-`reports/gold_v2_review_worksheet.md` for the row-by-row worksheet. Not done as of this writing.
+[GOLD_V2_REVIEW_CHECKLIST.md](GOLD_V2_REVIEW_CHECKLIST.md) for the exact procedure,
+`reports/gold_v2_review_worksheet.md` for the blank row-by-row worksheet to fill in, and
+`reports/gold_v2_draft_review.md` for a prepared review pass (every numeric value independently
+recomputed from the fact store with its accession/filing URL, every qualitative section's chunk
+count and opening text, every abstention checked against objective criteria) - findings only, no
+label approved. Not done as of this writing.
+
+**See [docs/DATASET_INTEGRITY.md](DATASET_INTEGRITY.md)** for exactly which rows/splits in this
+file and `gold_v1` have been read during development and are therefore no longer any kind of
+holdout - do not describe either file as untouched. **See
+[docs/HOLDOUT_V1_DESIGN.md](HOLDOUT_V1_DESIGN.md)** and `data/eval/holdout_v1_draft.jsonl` for a
+small, newly built set of 20 questions designed specifically to avoid the wording and answers used
+to develop recent fixes - not yet run against the agent, and not to be run before its own labels
+are reviewed.
 
 ## 3. Metrics
 
@@ -216,7 +228,10 @@ source. The audit also introduces **automatic-attachment precision** - of the ci
 `attribute_claims` adds (not ones the model wrote itself), the fraction a manual read confirms
 genuinely supports the whole claim - as an explicitly separate, small-sample, qualitative measure
 from `citation_hygiene`'s bootstrap-CI statistic; see ERROR_ANALYSIS.md 3g for the count and why it
-is reported as a count rather than a rounded percentage.
+is reported as a count rather than a rounded percentage. A further, fresher audit sample - complete
+claim text and the complete (untrimmed) source passage for both auto-attached and model-written
+citations, prepared for human judgment rather than self-graded - is in
+`reports/citation_precision_review.md`.
 
 ### 3.3 System
 
