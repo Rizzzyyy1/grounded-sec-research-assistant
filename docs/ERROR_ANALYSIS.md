@@ -83,6 +83,7 @@ generative layer has something to add.
 | 25 | Asking for a ratio (`roe`) through `get_financial_metric` failed with only a list of *reported* metric names, giving the model nothing to recover with | Agent smoke test, `--llm ollama` (§3c) | `_metric` names `compute_ratio` explicitly when the requested name is a known ratio; `test_errors_are_actionable_for_the_model` |
 | 26 | **A citation the model wrote that resolved to no real source stayed in the *displayed* answer.** `validate_citations` already flagged it as invalid, but only in `warnings` - the raw text (what the CLI/API/UI actually shows) still had `"... $45,754 million. [S1]"` even though no `search_filings` call that run had ever registered an `S1`. Most common on numeric-tool answers: the prompt says tool figures need no bracket, so any bracket the model adds there is definitionally unresolvable | Live `finsight serve --llm ollama` query, "What was Coca-Cola revenue in 2023?" → `citations: []`, `warnings: ["citation to unknown source S1"]`, but `text` still ended in `[S1]` | `generation/citations.py::repair_citations` rewrites every bracket to only ever show labels present in `report.citations`; a bracket left with none becomes `[unverified]` - the claim stays, the fake pointer doesn't. Wired into both `generation/pipeline.py` and `agent/orchestrator.py` (the one shared rule, not a per-question patch). 6 new tests in `test_context_citations.py` (valid / unknown / duplicate-in-bracket / duplicate-across-sentences / mixed valid+invalid / zero-evidence-available); re-running `agent-ollama-natural` after the fix reproduced identical accuracy (0.808) and citation hygiene (7.7%) - this is a display fix, not a scoring change - and showed 7 of 38 stored answers changed text, 6 of them exactly this bug (`reports/runs/20260922-214435-agent-ollama-natural-citation-fix/`) |
 | 27 | **`compare_companies` returning a bare `"cite_as": null` next to a real, correct value - with no formula, no inputs and no explanation visible for that row - was read by the model as "the value is missing", not "the citation is missing".** Combined with the system prompt's own permission to "say so plainly" when "a tool says the data is not available", the model answered "not available" for a company whose number the tool had in fact returned correctly, on both natural-probe `comparison` questions it was asked (§3d) | Natural-probe accuracy fell 0.808 → 0.731 after fact citations were added (row order below), both losses in `comparison` type; reproduced deterministically outside the eval harness by calling `compare_companies` and `ResearchAgent.answer` directly on the same two questions (§3d) | `_ValueResult` gives `compare_companies` the same formula + per-input-citation structure `compute_ratio` already had, plus an explicit `"note"` distinguishing "uncited" from "missing"; the system prompt's abstention guidance now says a null citation is about the citation only, and "not available" should follow an actual tool error, never a null field. `test_compare_companies_ratio_keeps_the_value_unambiguous_with_no_citation` reproduces the exact payload shape (a company with no catalogued filing) and asserts value/formula/inputs stay present regardless |
+| 28 | **Row 25's fix (name `compute_ratio` in the error) was necessary but not sufficient: it only improved the message, and a weak model does not reliably retry with the named tool after reading an error.** Asking `get_financial_metric` for a ratio (`net_margin`, `roe`, `current_ratio`) still failed 3 of 4 ways on the natural probe's `computed_metric` questions - narrating a fake tool call as text, or abstaining outright, instead of actually calling `compute_ratio` - even though the error told it exactly what to do | Natural-probe `computed_metric` accuracy was 0.000 through every stage of §3d; reproduced deterministically outside the eval harness on all 4 questions, isolating the mechanism (wrong tool + no recovery) from a genuinely different, unrelated failure on the 4th (§3e) | `get_financial_metric` now recognises a ratio name in the unambiguous case (one requested fiscal year, annual period) and answers exactly as `compute_ratio` would, rather than erroring and hoping for a retry - same formula, per-input citations, value. Multi-year, no-year and non-FY-period requests still get the explicit error (`test_ratio_through_get_financial_metric_only_redirects_the_unambiguous_case`): the redirect never guesses a fiscal period or invents a series `compute_ratio` cannot represent. `test_a_ratio_name_through_get_financial_metric_is_answered_not_rejected` asserts the redirected payload is byte-identical to calling `compute_ratio` directly. See §3e for full before/after numbers |
 
 ## 3b. Natural-phrasing probe (router and RAG baseline on `gold_v2_draft`, 38 questions)
 
@@ -121,8 +122,9 @@ gold data - never added to `data/eval/`). Full trace: `reports/smoke_test_agent_
 * **Citation and grounding weaknesses a 3B model has that Claude is expected not to have (untested
   claim - no `--llm claude` run exists to compare against).** Quantified, not just anecdotal: the
   share of answers with a valid citation and no flagged claim/figure is **4.2% (dev) / 0.0% (test) /
-  7.7% (natural) as first measured here** - since superseded on the natural probe by §3d below
-  (22.2%, after the numeric-fact citation fix; dev/test not yet re-measured) - against the router's
+  7.7% (natural) as first measured here** - since superseded on the natural probe, first by §3d
+  (22.2%, after the numeric-fact citation fix) and then by §3e (**28.6%**, after the
+  `computed_metric` fix; dev/test not yet re-measured) - against the router's
   36.8-38.6% and the extractive baseline's 96.6-100% (which can only ever quote, so it is close to
   100% by construction) - see "Citation hygiene" in [RESULTS](../reports/RESULTS.md). None of these
   percentages moved after the display fix immediately below (row 26) - it counted an unresolvable
@@ -148,17 +150,22 @@ gold data - never added to `data/eval/`). Full trace: `reports/smoke_test_agent_
   different tool call - sometimes a different tool - on consecutive runs at Ollama's default
   sampling. `generation/ollama.py` now sends `temperature=0, seed=0`; confirmed deterministic by
   three repeated single-question runs after the change.
-* **A genuine head-to-head, not a demo number - and it is mixed, not a clean win.** On the
-  **templated `gold_v1` test split**, the agent scores significantly *below* the router (0.735 vs
+* **A genuine head-to-head, not a demo number.** *As originally measured* (before §3e), the agent
+  scored significantly *below* the router on the **templated `gold_v1` test split** (0.735 vs
   0.941; paired diff -0.206, CI [-0.382, -0.029], excludes zero), driven by `comparison` (0.0 vs
-  1.0) and `computed_metric` (0.125 vs 1.0) - the ROE-style tool-confusion above, which persists at
-  `temperature=0` even after the better error message (see the full trace for the exact turn where
-  it gives up instead of retrying). On the **natural-phrasing probe** (`gold_v2_draft`, same file,
-  current code as of 3d below) the two are statistically indistinguishable instead (paired diff
-  -0.077, CI crosses zero, McNemar p=0.6875). Both comparisons beat the extractive baseline
-  decisively (test: +0.529, CI [0.35, 0.71]; natural: +0.346, CI [0.15, 0.54]). Any summary that
-  reports only one of the two router comparisons is telling half the story. Exact numbers:
-  [RESULTS](../reports/RESULTS.md).
+  1.0) and `computed_metric` (0.125 vs 1.0) - the ROE-style tool-confusion, which persisted at
+  `temperature=0` even after the better error message alone (row 25). **After §3e's fix**
+  (`get_financial_metric` answering a ratio directly instead of erroring), re-measured on the same
+  split (`reports/runs/20260923-005015-agent-ollama-test-cm-fix-check/`): `computed_metric` 0.125 →
+  0.625 (4 of 8 questions gained, zero lost), overall test accuracy 0.735 → 0.853, and the
+  agent-vs-router gap is **no longer statistically distinguishable** either (diff -0.088, CI
+  [-0.235, 0.059], McNemar p=0.4531 - was p=0.065 and excluded zero before). `comparison` stayed at
+  0.0 - a different, unrelated mechanism (not diagnosed). On the **natural-phrasing probe**
+  (`gold_v2_draft`, same file, current code as of 3e) the agent now *outscores* the router numerically
+  (0.885 vs 0.846) while remaining statistically indistinguishable (McNemar p=1.0). Both splits beat
+  the extractive baseline decisively (test: +0.647, CI [0.47, 0.82]; natural: +0.462, CI [0.27,
+  0.65]). Any summary that reports only one of the two router comparisons, or only the pre-§3e
+  numbers, is telling an outdated story. Exact numbers: [RESULTS](../reports/RESULTS.md).
 
 ## 3d. Source provenance for tool-derived facts (why citation hygiene was structurally near-zero, and a regression found while fixing it)
 
@@ -245,6 +252,92 @@ defect: extending the catalogue to cover every accession `fact_versions` referen
 live EDGAR fetch per missing accession (out of scope here - no network side effects beyond what
 `finsight ingest` already does were introduced in this pass) and is the natural next step, not a
 "fix" to backfill by relaxing the never-fabricate rule.
+
+## 3e. Why every `computed_metric` question scored zero, and a quantified audit of citation-hygiene failures
+
+§3d's net effect table left one number unexplained: `computed_metric` (the 4 `nat-ratio-*` rows,
+"how profitable was X as a percentage of revenue", "return on equity", "current ratio", "what
+fraction of sales was gross profit") stayed at **0.000 through every stage measured there**. Tracing
+each question's tool trace, values, calculation and grader decision (not just the accuracy number)
+found one mechanism behind three of the four failures, and a second, unrelated, already-documented
+one behind the fourth - reproduced deterministically outside the eval harness on all four before
+any code changed:
+
+| Question | Tool called | Result | What the model did next |
+|---|---|---|---|
+| MSFT net_margin | `get_financial_metric(metric="net_margin")` | `ToolError`: "'net_margin' is a ratio, not a reported metric; use compute_ratio" | Narrated `compute_ratio` as **plain text JSON**, never issued it - answer became the narration itself |
+| XOM `roe` | `get_financial_metric(metric="roe")` | same `ToolError` shape | **Abstained**, writing "we would need to call get_financial_metric ... and then compute the ratio" instead of doing it |
+| WMT `current_ratio` | `get_financial_metric(metric="current_ratio")` | same `ToolError` shape | Narrated `compute_ratio` as text again, then hallucinated `[S1, S2]` brackets that resolved to nothing |
+| AAPL gross profit **fraction** | `get_financial_metric(metric="gross_profit")` | **succeeded** - real value, real citation | Stated the raw dollar figure and stopped; never computed the fraction at all |
+
+The first three share one mechanism: the model reached for `get_financial_metric` with a *ratio*
+name, not a reported one. Row 25 had already made that error message name the right tool
+(`"... use compute_ratio"`) - necessary, but not sufficient: a weak model does not reliably
+recover from an error by retrying with the tool it names, even when told exactly what to do (row
+28). The fourth is a *different*, already-documented weakness: the question never says "margin",
+"ratio" or "fraction" in a way the model's own reasoning connects to a ratio tool at all - it just
+treats "what fraction ... was left as gross profit" as a request for the gross-profit figure and
+stops there. This is the same limitation §3b already found and *deliberately left unfixed* for the
+router ("Ratio asked in words that name neither 'margin' nor a ratio... fixing it would make the
+probe in-sample") - now shown to affect the LLM agent identically, not a new bug.
+
+**Fix, scoped to the demonstrated mechanism only:** `get_financial_metric` now recognises when the
+requested `metric` is actually a known ratio name, and - only in the unambiguous case where exactly
+one fiscal year was requested at the default annual period - answers exactly as `compute_ratio`
+would, reusing its formula/per-input-citation logic unchanged (row 28). It does **not** touch the
+fourth question's mechanism at all: `gross_profit` is a valid reported metric, the tool correctly
+returns it, and nothing about tool selection was wrong there - fixing *that* would mean teaching the
+system to recognise this specific phrasing, which is exactly the in-sample risk §3b already refused.
+
+**Affected questions, run first:** a 4-question eval subset scored **0.000 → 0.750** (3 of 4;
+`reports/runs/20260923-001907-agent-ollama-computed-metric-subset-fix/`), matching the direct
+reproduction exactly - `net_margin`/`roe`/`current_ratio` all now answer correctly with citations
+(`test_a_ratio_name_through_get_financial_metric_is_answered_not_rejected`); the gross-profit
+fraction question is unchanged, as expected.
+
+**Full natural probe, paired against both prior runs** (`reports/runs/20260923-003846-agent-ollama-natural/`,
+identical `--workers 1`/model/settings throughout):
+
+| | vs. **current** 0.769 run (pre-this-fix) | vs. **original** 0.808 baseline (pre-any-citation-work) |
+|---|---|---|
+| Accuracy | **0.769 → 0.885** | 0.808 → 0.885 (net **+0.077**, despite `nat-cmp-016` §3d still costing one question) |
+| Citation hygiene | 22.2% → **28.6%** | 7.7% → 28.6% (**≈3.7×**) |
+| Questions that changed | `nat-ratio-009`, `nat-ratio-011`, `nat-ratio-012`: **False → True**. Nothing else moved | Same three, plus the already-disclosed `nat-cmp-016` regression from §3d |
+| New regressions | **None** | **None** |
+
+`computed_metric` by itself: 0.000 → 0.750 [0.25, 1.00]. `nat-ratio-010` (gross-profit fraction)
+remains the sole `computed_metric` failure, for the reason above - not chased further.
+
+### Citation-hygiene failures, by cause (this run: 28 answered/non-abstained, 8 clean, 20 with ≥1 issue)
+
+Read from `warnings`, `citations` and `tool_calls` on every non-abstained answer, then verified by
+hand against the underlying filing-catalogue state (`FactStore.filing_url`) rather than trusting
+the warning label alone - a warning names a *symptom*, not always the *cause*:
+
+| Cause | Count | What it looks like |
+|---|---|---|
+| **Missing filing-catalogue entry** (§3d) - the fact itself cannot be cited at all | **4** | 1 stated plainly with no bracket, exactly as instructed (`nat-ratio-009`); 3 more where the model **invented** a bracket anyway despite `source_id: null` (`nat-num-002/005/008`, all three independently confirmed to trace to an uncatalogued accession) - the root cause is the same catalogue gap, but the *visible* warning is "citation to unknown source", not a metadata note |
+| **Model omitted an available citation** | **13** | 12 flagged as "uncited claim" (mostly qualitative `search_filings` answers that paraphrased from the passages instead of quoting/citing them - the pre-existing weakness in §3c bullet (b)); **1 more not flagged at all** (`nat-cmp-015`) - see the validator gap below |
+| **Source does not support the claim** (stated figure not found in any cited or tool evidence) | **2** | Both are `trend` (%-growth) questions where the model self-computed a percentage instead of a tool returning one (there is no growth/CAGR tool - ADR-0003's "numbers come from tools" is being stretched here); one is arithmetically wrong (JPM: `(58471-37676)/37676 = 55.2%`, the model said "54%") |
+| **Invalid source ID** as its own distinct cause (a hallucinated id with *no* traceable root in a catalogue gap) | **0** | Not observed separately from the missing-catalogue overlap above in this run |
+| **Another cause: a validator loophole, not a real citation** | **1** (`nat-cmp-015`) | `compare_companies` gave the model a fully valid `cite_as: "[S3, S4]"` for the value it reported, and the model **did not use it** - yet no "uncited claim" warning fired, because the answer's number ("32.1%") happened to also be findable via the *tool-evidence fallback* meant for numeric tool answers. Investigated further, not fixed here: this bucket is only 1 case in this run and a fix risks tuning the validator narrowly to this shape rather than to a demonstrated general gap |
+
+**What this says about where to invest next, in priority order suggested by the counts above:**
+1. **Missing filing-catalogue entries (4/20, ~20%)** is the largest *structural* cause and the one
+   already scoped in §3d's roadmap item - extending the catalogue to cover every accession
+   `fact_versions` references. Still not started here per this turn's explicit scope.
+2. **Model omitting available citations on qualitative answers (12/20, ~60%)** is the largest
+   bucket overall, but it is a *model* behavior (paraphrasing from training-data familiarity
+   instead of quoting retrieved text, §3c bullet (b)), not a system defect to patch - already
+   disclosed, not newly discovered here.
+3. **Self-computed trend/growth figures (2/20)** is a real, small, well-defined gap: a `trend`
+   question has no tool that returns a percentage change, so the model computes one itself,
+   outside ADR-0003's "numbers come from tools" guarantee, and is sometimes wrong. A dedicated
+   growth/CAGR helper (mirroring `compute_ratio`'s formula+citation shape) would close this
+   specific gap without touching anything the natural probe currently gets right.
+4. **The validator loophole (1/20)** is real but too small a sample here to design a general fix
+   from without risking exactly the in-sample tuning this project has repeatedly refused to do
+   (§3b, `scripts/make_gold_v2_draft.py`'s own warning). Worth a wider audit before acting on it.
 
 ## 4. Design changes forced by evidence
 

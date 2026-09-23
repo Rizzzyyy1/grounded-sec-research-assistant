@@ -176,12 +176,20 @@ all headline numbers reproducible via one documented command.
    (ADR-0012). Verified live: `finsight serve --llm ollama`, `/readyz`, `/v1/query`, and the
    Streamlit Ask page all confirmed end to end with a real local model, zero cost.
 6. ~~Give XBRL-tool answers a real citation, not just passages~~ **Done**: `agent/tools.py::_register_fact`
-   + `Citation.kind` (ERROR_ANALYSIS.md 3d). Natural-probe citation hygiene 7.7% → 22.2%. What's left:
-   (a) re-measure `gold_v1` dev/test citation hygiene against this fix - not yet done, see
-   `scripts/collect_results.py`'s "Citation hygiene" caveat; (b) extend the filing catalogue so a
-   "latest restated value" fact can be cited even when its own accession was never downloaded (13.3%
-   of revenue facts checked cannot be cited today, concentrated in 4 companies' most recent years) -
-   needs a live EDGAR fetch per missing accession, not done here.
+   + `Citation.kind` (ERROR_ANALYSIS.md 3d), then ~~fix `computed_metric` scoring zero on the natural
+   probe~~ **Done**: `get_financial_metric` answers a ratio name directly instead of erroring and
+   hoping the model retries with `compute_ratio` (ERROR_ANALYSIS.md 3e). Natural-probe citation
+   hygiene 7.7% → 28.6%, accuracy 0.808 → 0.885 (net positive vs. the original baseline, zero new
+   regressions from the second fix). What's left, in the priority order 3e's failure-cause counts
+   suggest:
+   (a) extend the filing catalogue so a "latest restated value" fact can be cited even when its own
+   accession was never downloaded (the largest remaining structural cause, ~20% of citation-hygiene
+   failures in the latest run) - needs a live EDGAR fetch per missing accession, not done here;
+   (b) a `compute_growth`-style tool for `trend` questions (mirroring `compute_ratio`'s
+   formula+citation shape), closing the one bucket where the model still computes a figure itself
+   instead of a tool doing it (2 of 28 non-abstained answers, one arithmetically wrong);
+   (c) re-measure `gold_v1` dev/test citation hygiene against both fixes - not yet done, see
+   `scripts/collect_results.py`'s "Citation hygiene" caveat.
 
 ## Stretch ideas
 

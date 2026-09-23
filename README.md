@@ -62,13 +62,13 @@ Accuracy by question type on the **test** split (exploratory: few questions per 
 
 ### Citation hygiene (answers with a valid citation and no flagged claim/figure)
 
-Accuracy alone hides this: a fluent answer can score correct on the numbers it states while citing nothing, or citing a source that does not exist. The router's text fallback and the free local agent both score far below the extractive baseline (which can only ever quote, so it is close to 100% by construction) - this is the more honest read of how "grounded" each system actually is, and it is not visible in the accuracy tables above. "Citing a source that does not exist" is still counted as a failure here either way, but it no longer reaches the reader looking like a real citation: any label the model writes that this run cannot back up is rewritten to `[unverified]` before the answer leaves the pipeline (`generation/citations.py::repair_citations`, ERROR_ANALYSIS.md row 26) - confirmed to leave these numbers unchanged by re-running the natural-phrasing probe after the fix. **The agent row below predates a second fix** (`agent/tools.py::_register_fact`, ERROR_ANALYSIS.md 3d): originally only a retrieved passage was citable, so a correct numeric answer could never register as clean here even when its figure was fully tool-verified. The dev/test numbers below have not been re-measured against that fix; the 38-question natural probe has, and rose 7.7% -> 22.2% with no loss in accuracy beyond one already-diagnosed case (3d) - expect a comparable rise here on a re-run, not the value shown.
+Accuracy alone hides this: a fluent answer can score correct on the numbers it states while citing nothing, or citing a source that does not exist. The router's text fallback and the free local agent both score far below the extractive baseline (which can only ever quote, so it is close to 100% by construction) - this is the more honest read of how "grounded" each system actually is, and it is not visible in the accuracy tables above. "Citing a source that does not exist" is still counted as a failure here either way, but it no longer reaches the reader looking like a real citation: any label the model writes that this run cannot back up is rewritten to `[unverified]` before the answer leaves the pipeline (`generation/citations.py::repair_citations`, ERROR_ANALYSIS.md row 26) - confirmed to leave these numbers unchanged by re-running the natural-phrasing probe after the fix. **The agent row's test column reflects two further fixes** (`agent/tools.py::_register_fact` giving XBRL facts a real citation, then a `computed_metric` tool-selection fix - ERROR_ANALYSIS.md 3d/3e): test accuracy rose 0.735 -> 0.853 and citation hygiene 0.0% -> 32.5% with zero new regressions (paired per-question diff against the pre-fix run). **The dev column has not been re-measured against either fix** - expect a comparable rise, not the value shown.
 
 | System | dev | test |
 |---|---|---|
 | Single-shot RAG (extractive) | 96.6% | 100.0% |
 | Tool router | 36.8% | 38.6% |
-| Agent (llama3.2:3b via Ollama, free & local) | 4.2% | 0.0% |
+| Agent (llama3.2:3b via Ollama, free & local) | 4.2% | 32.5% |
 
 ### Retrieval (section-level; no LLM), default config = hybrid, rerank off
 
@@ -84,7 +84,7 @@ Model `llama3.2:3b` via Ollama (ADR-0011), `temperature=0`/`seed=0`, one Apple S
 
 | System | dev accuracy [95% CI] | test accuracy [95% CI] | abstention F1 (test) | p50 ms | $/query |
 |---|---|---|---|---|---|
-| Agent (llama3.2:3b via Ollama, free & local) | 0.768 [0.667, 0.870] | 0.735 [0.588, 0.882] | 0.82 | 10217 | $0 (free local model) |
+| Agent (llama3.2:3b via Ollama, free & local) | 0.768 [0.667, 0.870] | 0.853 [0.735, 0.971] | 0.88 | 10333 | $0 (free local model) |
 | Tool router (for reference, no LLM) | 0.942 [0.884, 0.986] | 0.941 [0.853, 1.000] | 0.83 | 86 | $0 (no LLM) |
 | Single-shot RAG (extractive, for reference, no LLM) | 0.275 [0.174, 0.377] | 0.206 [0.088, 0.353] | 0.83 | 613 | $0 (no LLM) |
 
@@ -93,7 +93,7 @@ Accuracy by question type on the **test** split, agent-ollama vs router:
 | Type | Agent (Ollama) | Router |
 |---|---|---|
 | comparison | 0.000 | 1.000 |
-| computed_metric | 0.125 | 1.000 |
+| computed_metric | 0.625 | 1.000 |
 | fact_lookup | 1.000 | 0.000 |
 | numeric | 1.000 | 1.000 |
 | out_of_scope | 1.000 | 1.000 |
@@ -101,13 +101,13 @@ Accuracy by question type on the **test** split, agent-ollama vs router:
 
 On the templated `gold_v1` test split:
 
-* **agent-ollama vs router** (`gold_v1` templated test split): n=34 shared questions, accuracy 0.735 vs 0.941, paired difference -0.206 [-0.382, -0.029] (statistically distinguishable), McNemar exact p=0.0654
-* **agent-ollama vs single-shot RAG (extractive)** (`gold_v1` templated test split): n=34 shared questions, accuracy 0.735 vs 0.206, paired difference 0.529 [0.353, 0.706] (statistically distinguishable), McNemar exact p=0.0000
+* **agent-ollama vs router** (`gold_v1` templated test split): n=34 shared questions, accuracy 0.853 vs 0.941, paired difference -0.088 [-0.235, 0.059] (not distinguishable), McNemar exact p=0.4531
+* **agent-ollama vs single-shot RAG (extractive)** (`gold_v1` templated test split): n=34 shared questions, accuracy 0.853 vs 0.206, paired difference 0.647 [0.471, 0.824] (statistically distinguishable), McNemar exact p=0.0000
 
 On the 38-question natural-phrasing probe (same file and current code as the router/RAG baselines above, so this is a same-moment, apples-to-apples comparison):
 
-* **agent-ollama vs router** (natural phrasing, `gold_v2_draft`): n=26 shared questions, accuracy 0.769 vs 0.846, paired difference -0.077 [-0.269, 0.115] (not distinguishable), McNemar exact p=0.6875
-* **agent-ollama vs single-shot RAG (extractive)** (natural phrasing, `gold_v2_draft`): n=26 shared questions, accuracy 0.769 vs 0.423, paired difference 0.346 [0.154, 0.538] (statistically distinguishable), McNemar exact p=0.0039
+* **agent-ollama vs router** (natural phrasing, `gold_v2_draft`): n=26 shared questions, accuracy 0.885 vs 0.846, paired difference 0.038 [-0.115, 0.192] (not distinguishable), McNemar exact p=1.0000
+* **agent-ollama vs single-shot RAG (extractive)** (natural phrasing, `gold_v2_draft`): n=26 shared questions, accuracy 0.885 vs 0.423, paired difference 0.462 [0.269, 0.654] (statistically distinguishable), McNemar exact p=0.0005
 
 
 ### Templated vs natural phrasing (`gold_v2_draft`, 38 questions, unverified draft labels)

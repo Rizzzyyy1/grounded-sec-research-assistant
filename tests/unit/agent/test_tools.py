@@ -55,6 +55,45 @@ def test_stringified_array_arguments_are_accepted_not_rejected(ctx: AgentContext
     assert [v["fiscal_year"] for v in payload["values"]] == [2024]
 
 
+def test_a_ratio_name_through_get_financial_metric_is_answered_not_rejected(
+    ctx: AgentContext,
+) -> None:
+    """Regression: asking for a ratio (e.g. "net_margin", "roe", "current_ratio") through
+    get_financial_metric used to raise a ToolError naming the right tool - technically correct,
+    but a live Ollama run showed a small model does not reliably retry with that tool after
+    reading the error: it narrated a fake tool call as plain text, or gave up and abstained,
+    instead (ERROR_ANALYSIS.md 3e). Answering exactly as compute_ratio would removes the need to
+    recover at all - same value, formula, per-input citations."""
+    via_metric = call(
+        ctx, "get_financial_metric", ticker="AAPL", metric="gross_margin", fiscal_years=[2024]
+    )
+    via_ratio = call(ctx, "compute_ratio", ticker="AAPL", ratio="gross_margin", fiscal_year=2024)
+    assert via_metric == via_ratio  # identical payload either way - a true redirect, not a copy
+
+
+def test_ratio_through_get_financial_metric_only_redirects_the_unambiguous_case(
+    ctx: AgentContext,
+) -> None:
+    """compute_ratio takes exactly one fiscal year and always means FY - the redirect must not
+    guess when get_financial_metric's own richer argument shape (no years = "all available",
+    several years, or a quarter) says something compute_ratio cannot represent. Falling through
+    to the ordinary, actionable ToolError is correct there, not a silent period/year switch."""
+    with pytest.raises(ToolError, match="is a ratio, not a reported metric; use compute_ratio"):
+        dispatch(
+            ctx, "get_financial_metric", {"ticker": "AAPL", "metric": "gross_margin"}
+        )  # no years
+    with pytest.raises(ToolError, match="is a ratio, not a reported metric; use compute_ratio"):
+        dispatch(
+            ctx, "get_financial_metric",
+            {"ticker": "AAPL", "metric": "gross_margin", "fiscal_years": [2023, 2024]},
+        )  # fmt: skip
+    with pytest.raises(ToolError, match="is a ratio, not a reported metric; use compute_ratio"):
+        dispatch(
+            ctx, "get_financial_metric",
+            {"ticker": "AAPL", "metric": "gross_margin", "fiscal_years": [2024], "period": "Q1"},
+        )  # fmt: skip
+
+
 def test_bare_string_where_a_list_of_one_ticker_was_meant_is_accepted(
     ctx: AgentContext,
 ) -> None:

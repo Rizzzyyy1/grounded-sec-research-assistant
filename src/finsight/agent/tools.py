@@ -219,9 +219,23 @@ def _as_list(value: Any) -> list[Any]:
 
 # --------------------------------------------------------------------------- handlers
 def get_financial_metric(ctx: AgentContext, args: Mapping[str, Any]) -> ToolOutput:
-    ticker, metric = _ticker(ctx, str(args["ticker"])), _metric(str(args["metric"]))
+    ticker = _ticker(ctx, str(args["ticker"]))
+    raw_metric = str(args["metric"])
     period = FiscalPeriod(str(args.get("period", "FY")))
     years = [int(y) for y in _as_list(args.get("fiscal_years"))]
+    if raw_metric in RATIOS and len(years) == 1 and period is FiscalPeriod.FY:
+        # A model reaching for a ratio (e.g. "net_margin", "roe") through this tool instead of
+        # compute_ratio is a common, recoverable mistake (row 25) - the earlier fix only improved
+        # the error message, and a weak model does not reliably retry with the right tool after
+        # reading it (observed: it narrates a fake tool call as text, or gives up and abstains,
+        # instead - ERROR_ANALYSIS.md 3e). Answering exactly as compute_ratio would removes the
+        # need to recover at all, and reuses its formula/inputs/citations unchanged. Only redirect
+        # the unambiguous case (one requested year, annual period) that this tool can answer the
+        # same way compute_ratio would; anything else falls through to the actionable error below.
+        return compute_ratio_tool(
+            ctx, {"ticker": ticker, "ratio": raw_metric, "fiscal_year": years[0]}
+        )
+    metric = _metric(raw_metric)
     # ALL store access happens inside one critical section: a DuckDB connection must not be used
     # by two threads at once, and parallel tool calls do exactly that if the lock is released
     # between the two queries.

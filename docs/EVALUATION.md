@@ -174,9 +174,17 @@ the majority of any gold set - could never produce a `Citation` no matter how co
 tool-verified its figure was (`has_citation` was almost unreachable outside a passage). Extending
 citation labels to XBRL facts (`agent/tools.py::_register_fact`, `Citation.kind: "passage" |
 "fact"`, ERROR_ANALYSIS.md 3d) measured, on the same natural probe, citation hygiene **7.7% →
-22.2%** for an accuracy cost of **0.808 → 0.769** (one question, now correctly grounded but
+22.2%** for an accuracy cost of 0.808 → 0.769 (one question, now correctly grounded but
 over-cautious rather than wrong - see 3d for the full regression story, including a real bug found
-and fixed along the way, and why dev/test have not yet been re-measured against this fix).
+and fixed along the way). A second, narrower fix - `get_financial_metric` answering a ratio name
+directly instead of erroring and hoping the model retries with `compute_ratio` (ERROR_ANALYSIS.md
+3e) - then took `computed_metric` accuracy from 0.000 to 0.750 with **zero new regressions**,
+pushing the same natural-probe run to **accuracy 0.885 / citation hygiene 28.6%** (net +0.077
+accuracy and ≈3.7× hygiene vs. the original, pre-any-citation-work baseline). `gold_v1` dev/test
+have still not been re-measured against either fix - flagged explicitly wherever their numbers
+appear rather than left stale and unlabelled. §3e also breaks citation-hygiene failures down by
+cause (missing filing-catalogue entry, model omitting an available citation, a self-computed figure
+unsupported by any evidence, and one validator loophole) with counts, not just the aggregate rate.
 `CitationHygiene.citation_kinds` (diagnostic only, does not affect `clean`) now records whether a
 clean answer's citation was a `fact`, a `passage`, or both, so a future report can tell which kind
 of grounding actually improved rather than reading one aggregate rate.

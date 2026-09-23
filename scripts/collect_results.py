@@ -131,12 +131,11 @@ def citation_hygiene_section() -> list[str]:
         "back up is rewritten to `[unverified]` before the answer leaves the pipeline "
         "(`generation/citations.py::repair_citations`, ERROR_ANALYSIS.md row 26) - confirmed to leave "
         "these numbers unchanged by re-running the natural-phrasing probe after the fix. **The agent "
-        "row below predates a second fix** (`agent/tools.py::_register_fact`, ERROR_ANALYSIS.md 3d): "
-        "originally only a retrieved passage was citable, so a correct numeric answer could never "
-        "register as clean here even when its figure was fully tool-verified. The dev/test numbers "
-        "below have not been re-measured against that fix; the 38-question natural probe has, and "
-        "rose 7.7% -> 22.2% with no loss in accuracy beyond one already-diagnosed case (3d) - expect "
-        "a comparable rise here on a re-run, not the value shown.",
+        "row's test column reflects two further fixes** (`agent/tools.py::_register_fact` giving "
+        "XBRL facts a real citation, then a `computed_metric` tool-selection fix - ERROR_ANALYSIS.md "
+        "3d/3e): test accuracy rose 0.735 -> 0.853 and citation hygiene 0.0% -> 32.5% with zero new "
+        "regressions (paired per-question diff against the pre-fix run). **The dev column has not "
+        "been re-measured against either fix** - expect a comparable rise, not the value shown.",
         "",
         "| System | dev | test |",
         "|---|---|---|",
