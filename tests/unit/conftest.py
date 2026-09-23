@@ -56,7 +56,7 @@ from pathlib import Path  # noqa: E402
 from finsight.agent.tools import AgentContext  # noqa: E402
 from finsight.config.settings import RetrievalSettings  # noqa: E402
 from finsight.config.universe import Universe, load_universe  # noqa: E402
-from finsight.core.schemas import FinancialFact  # noqa: E402
+from finsight.core.schemas import FilingRef, FinancialFact  # noqa: E402
 from finsight.indexing.embeddings import HashingEmbedder  # noqa: E402
 from finsight.indexing.sparse_index import SparseIndex  # noqa: E402
 from finsight.indexing.vector_store import InMemoryVectorStore  # noqa: E402
@@ -78,6 +78,13 @@ VALUES = {
             "total_assets": 4_002_814e6},
 }  # fmt: skip
 INSTANT = {"shareholders_equity", "total_assets"}
+_TICKER_NUM = {"AAPL": 1, "MSFT": 2, "JPM": 3}
+
+
+def _accession(ticker: str, year: int) -> str:
+    """One accession per (ticker, year), like a real filing - AAPL FY2024 keeps the literal
+    value ``0000000001-24-000001`` several tests assert on."""
+    return f"{_TICKER_NUM[ticker]:010d}-{year % 100:02d}-000001"
 
 
 def _facts(ticker: str) -> ParsedFacts:
@@ -91,7 +98,7 @@ def _facts(ticker: str) -> ParsedFacts:
                 unit="USD", period_type="instant" if instant else "duration",
                 start=None if instant else date(year - 1, 10, 1), end=date(year, 9, 28),
                 fiscal_year=year, fiscal_period=FiscalPeriod.FY, form=FormType.TEN_K,
-                filed=date(year, 11, 1), accession="0000000001-24-000001"))  # fmt: skip
+                filed=date(year, 11, 1), accession=_accession(ticker, year)))  # fmt: skip
     return ParsedFacts(facts, [])
 
 
@@ -105,6 +112,14 @@ def ctx(make_chunk: ChunkFactory, universe: Universe) -> AgentContext:  # type: 
     store = FactStore()
     for t in VALUES:
         store.replace_company_facts(t, _facts(t))
+        for year in (2022, 2023, 2024):
+            acc = _accession(t, year)
+            store.upsert_filing(FilingRef(
+                cik="0000000001", ticker=t, company=f"{t} Inc.", form=FormType.TEN_K, accession=acc,
+                filed=date(year, 11, 1), period_of_report=date(year, 9, 28), fiscal_year=year,
+                fiscal_period=FiscalPeriod.FY, primary_doc="doc.htm",
+                url=f"https://example.com/{acc}",
+            ))  # fmt: skip
     corpus = [
         make_chunk("Apple depends on outsourcing partners in China mainland for manufacturing.", ticker="AAPL", year=2024, item="1A"),
         make_chunk("Apple faces new regulation of artificial intelligence that could increase compliance costs.", ticker="AAPL", year=2024, item="1A"),

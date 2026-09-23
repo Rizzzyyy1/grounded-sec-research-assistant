@@ -175,6 +175,13 @@ all headline numbers reproducible via one documented command.
    {auto,claude,ollama}` (or `FINSIGHT_LLM_PROVIDER`), explicit and non-fallback by construction
    (ADR-0012). Verified live: `finsight serve --llm ollama`, `/readyz`, `/v1/query`, and the
    Streamlit Ask page all confirmed end to end with a real local model, zero cost.
+6. ~~Give XBRL-tool answers a real citation, not just passages~~ **Done**: `agent/tools.py::_register_fact`
+   + `Citation.kind` (ERROR_ANALYSIS.md 3d). Natural-probe citation hygiene 7.7% → 22.2%. What's left:
+   (a) re-measure `gold_v1` dev/test citation hygiene against this fix - not yet done, see
+   `scripts/collect_results.py`'s "Citation hygiene" caveat; (b) extend the filing catalogue so a
+   "latest restated value" fact can be cited even when its own accession was never downloaded (13.3%
+   of revenue facts checked cannot be cited today, concentrated in 4 companies' most recent years) -
+   needs a live EDGAR fetch per missing accession, not done here.
 
 ## Stretch ideas
 

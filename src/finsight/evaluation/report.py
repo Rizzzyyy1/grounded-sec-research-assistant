@@ -43,6 +43,15 @@ def new_run_dir(runs_dir: Path, name: str) -> Path:
     return path
 
 
+def _citation_kind_line(s: GenerationSummary) -> list[str]:
+    """Diagnostic breakdown, not part of the hygiene rate itself - see runner.py's
+    `GenerationSummary.clean_citation_kinds` docstring for why this line exists."""
+    if not s.clean_citation_kinds:
+        return []
+    parts = ", ".join(f"{k}: {v}" for k, v in sorted(s.clean_citation_kinds.items()))
+    return [f"  - of the clean answers, citation kind used ({parts})"]
+
+
 def render_generation_summary(name: str, s: GenerationSummary, config: dict[str, Any]) -> str:
     lines = [
         f"# Evaluation run: {name}",
@@ -53,6 +62,7 @@ def render_generation_summary(name: str, s: GenerationSummary, config: dict[str,
         f"recall {s.abstention_recall:.2f}, F1 {s.abstention_f1:.2f}",
         "* citation hygiene (answers with valid citations and no flagged claims/figures): "
         + ("n/a" if s.citation_clean_rate is None else f"{s.citation_clean_rate:.1%}"),
+        *_citation_kind_line(s),
         f"* latency: p50 {s.p50_latency_ms:.0f} ms, p95 {s.p95_latency_ms:.0f} ms",
         f"* cost: ${s.total_cost_usd:.4f} total, ${s.cost_per_query_usd:.5f} per query",
         "",

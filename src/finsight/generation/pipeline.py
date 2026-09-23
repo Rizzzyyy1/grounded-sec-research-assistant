@@ -18,7 +18,7 @@ from finsight.core.filters import RetrievalFilters
 from finsight.core.logging import bind_trace_id, get_logger
 from finsight.core.schemas import Answer, QueryType, Usage
 from finsight.generation.citations import repair_citations, validate_citations
-from finsight.generation.context import build_context
+from finsight.generation.context import Source, build_context
 from finsight.generation.guardrails import flag_suspicious_sources, is_out_of_scope
 from finsight.generation.llm import LLMClient
 from finsight.generation.prompts import (
@@ -110,8 +110,12 @@ class RagPipeline:
 
         report = validate_citations(text, context)
         cited = {c.source_id for c in report.citations}
-        evidence = [s.chunk.text for s in context.sources if s.id in cited] or [
-            s.chunk.text for s in context.sources
+        # RagPipeline's Context is always built by build_context, so every source is a passage -
+        # the isinstance narrows the type for mypy (Context is shared with the agent's fact
+        # citations) without changing behaviour.
+        passages = [s for s in context.sources if isinstance(s, Source)]
+        evidence = [s.chunk.text for s in passages if s.id in cited] or [
+            s.chunk.text for s in passages
         ]
         warnings = (
             *(f"citation to unknown source {label}" for label in report.invalid_ids),

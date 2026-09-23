@@ -58,9 +58,16 @@ if st.button("Ask", type="primary", disabled=len(question.strip()) < 3):
     if answer["citations"]:
         st.subheader("Sources")
         for c in answer["citations"]:
-            with st.expander(
-                f"[{c['source_id']}] {c['ticker']} {c['form']} FY{c['fiscal_year']} - Item {c['item']}"
-            ):
+            if c["kind"] == "fact":
+                header = (
+                    f"[{c['source_id']}] {c['ticker']} FY{c['fiscal_year']} - {c['metric']} (XBRL)"
+                )
+            else:
+                header = (
+                    f"[{c['source_id']}] {c['ticker']} {c['form']} FY{c['fiscal_year']} "
+                    f"- Item {c['item']}"
+                )
+            with st.expander(header):
                 st.write(c["quote"])
                 st.markdown(f"[Open the filing]({c['url']})")
     if answer["tool_calls"]:

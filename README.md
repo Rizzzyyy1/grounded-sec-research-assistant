@@ -62,7 +62,7 @@ Accuracy by question type on the **test** split (exploratory: few questions per 
 
 ### Citation hygiene (answers with a valid citation and no flagged claim/figure)
 
-Accuracy alone hides this: a fluent answer can score correct on the numbers it states while citing nothing, or citing a source that does not exist. The router's text fallback and the free local agent both score far below the extractive baseline (which can only ever quote, so it is close to 100% by construction) - this is the more honest read of how "grounded" each system actually is, and it is not visible in the accuracy tables above. "Citing a source that does not exist" is still counted as a failure here either way, but it no longer reaches the reader looking like a real citation: any label the model writes that this run cannot back up is rewritten to `[unverified]` before the answer leaves the pipeline (`generation/citations.py::repair_citations`, ERROR_ANALYSIS.md row 26) - confirmed to leave these numbers unchanged by re-running the natural-phrasing probe after the fix.
+Accuracy alone hides this: a fluent answer can score correct on the numbers it states while citing nothing, or citing a source that does not exist. The router's text fallback and the free local agent both score far below the extractive baseline (which can only ever quote, so it is close to 100% by construction) - this is the more honest read of how "grounded" each system actually is, and it is not visible in the accuracy tables above. "Citing a source that does not exist" is still counted as a failure here either way, but it no longer reaches the reader looking like a real citation: any label the model writes that this run cannot back up is rewritten to `[unverified]` before the answer leaves the pipeline (`generation/citations.py::repair_citations`, ERROR_ANALYSIS.md row 26) - confirmed to leave these numbers unchanged by re-running the natural-phrasing probe after the fix. **The agent row below predates a second fix** (`agent/tools.py::_register_fact`, ERROR_ANALYSIS.md 3d): originally only a retrieved passage was citable, so a correct numeric answer could never register as clean here even when its figure was fully tool-verified. The dev/test numbers below have not been re-measured against that fix; the 38-question natural probe has, and rose 7.7% -> 22.2% with no loss in accuracy beyond one already-diagnosed case (3d) - expect a comparable rise here on a re-run, not the value shown.
 
 | System | dev | test |
 |---|---|---|
@@ -106,8 +106,8 @@ On the templated `gold_v1` test split:
 
 On the 38-question natural-phrasing probe (same file and current code as the router/RAG baselines above, so this is a same-moment, apples-to-apples comparison):
 
-* **agent-ollama vs router** (natural phrasing, `gold_v2_draft`): n=26 shared questions, accuracy 0.808 vs 0.846, paired difference -0.038 [-0.192, 0.115] (not distinguishable), McNemar exact p=1.0000
-* **agent-ollama vs single-shot RAG (extractive)** (natural phrasing, `gold_v2_draft`): n=26 shared questions, accuracy 0.808 vs 0.423, paired difference 0.385 [0.192, 0.577] (statistically distinguishable), McNemar exact p=0.0020
+* **agent-ollama vs router** (natural phrasing, `gold_v2_draft`): n=26 shared questions, accuracy 0.769 vs 0.846, paired difference -0.077 [-0.269, 0.115] (not distinguishable), McNemar exact p=0.6875
+* **agent-ollama vs single-shot RAG (extractive)** (natural phrasing, `gold_v2_draft`): n=26 shared questions, accuracy 0.769 vs 0.423, paired difference 0.346 [0.154, 0.538] (statistically distinguishable), McNemar exact p=0.0039
 
 
 ### Templated vs natural phrasing (`gold_v2_draft`, 38 questions, unverified draft labels)

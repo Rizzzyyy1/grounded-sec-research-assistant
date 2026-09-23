@@ -5,6 +5,13 @@ remains by filing and position so the model reads coherent passages -> label S1.
 
 Source text is HTML-escaped when rendered, so retrieved filing text can never close the
 ``<source>`` tag and smuggle in prompt structure (see guardrails).
+
+Two kinds of evidence are citable, both assigned labels from the same ``S1, S2, ...`` sequence so
+``generation/citations.py`` can validate and cite either one the same way: :class:`Source` wraps a
+retrieved passage (built here, from :func:`build_context`); :class:`FactSource` wraps one reported
+XBRL value (built by ``agent/tools.py``, which is the only layer that talks to the fact store - see
+its module docstring for why a citation is never synthesised for a *calculated* value that spans
+more than one filing).
 """
 
 from __future__ import annotations
@@ -29,12 +36,33 @@ class Source:
 
 
 @dataclass(frozen=True)
+class FactSource:
+    """A citable, reported XBRL fact - traced to the exact filing and tag it came from.
+
+    Unlike a passage, a fact has no single sentence to quote; ``detail`` is the human-readable
+    string a reader checks it against instead (value, XBRL tag, filing and accession).
+    """
+
+    id: str  # "S1", "S2", ... - the same sequence as Source, so labels never collide
+    ticker: str
+    fiscal_year: int
+    metric: str  # canonical name, e.g. "revenue"
+    tag: str  # raw XBRL concept, e.g. "RevenueFromContractWithCustomerExcludingAssessedTax"
+    url: str  # the one filing this value was reported in
+    detail: str
+
+    @property
+    def label(self) -> str:
+        return f"{self.ticker} {self.metric} FY{self.fiscal_year}"
+
+
+@dataclass(frozen=True)
 class Context:
-    sources: tuple[Source, ...]
+    sources: tuple[Source | FactSource, ...]
     text: str
     tokens: int
 
-    def get(self, source_id: str) -> Source | None:
+    def get(self, source_id: str) -> Source | FactSource | None:
         return next((s for s in self.sources if s.id == source_id), None)
 
 

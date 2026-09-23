@@ -67,10 +67,19 @@ def abstention_scores(pairs: Sequence[tuple[GoldExample, Answer]]) -> Abstention
 
 @dataclass(frozen=True)
 class CitationHygiene:
+    """``clean`` is the pass/fail bit every report reads; its definition has not changed, so a
+    run's ``citation_clean_rate`` stays comparable across the citation-display fix and the
+    source-provenance fix (both only changed how many answers *can* satisfy it, never what
+    satisfying it means). ``citation_kinds`` is purely diagnostic, added when fact citations
+    (agent/tools.py::_register_fact) started making ``has_citation`` reachable for numeric
+    answers, not just ones citing a retrieved passage - see EVALUATION.md 3.2.
+    """
+
     has_citation: bool
     invalid_citations: int
     uncited_claims: int
     unverified_figures: int
+    citation_kinds: frozenset[str] = frozenset()
 
     @property
     def clean(self) -> bool:
@@ -86,4 +95,5 @@ def citation_hygiene(answer: Answer) -> CitationHygiene:
         invalid_citations=sum(x.startswith("citation to unknown") for x in w),
         uncited_claims=sum(x.startswith("uncited claim") for x in w),
         unverified_figures=sum(x.startswith("unverified figure") for x in w),
+        citation_kinds=frozenset(c.kind for c in answer.citations),
     )

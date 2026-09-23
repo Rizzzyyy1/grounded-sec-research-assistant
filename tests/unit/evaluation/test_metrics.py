@@ -190,3 +190,23 @@ def test_citation_hygiene_from_warnings() -> None:
                                warnings=("citation to unknown source S9", "uncited claim: a", "unverified figure: $5")))  # fmt: skip
     assert (bad.invalid_citations, bad.uncited_claims, bad.unverified_figures) == (1, 1, 1)
     assert not bad.clean
+
+
+def test_citation_hygiene_reports_which_kinds_of_source_were_cited() -> None:
+    """citation_kinds is diagnostic only - it must never change `clean`, so old runs (from before
+    fact citations existed) stay comparable to new ones on the pass/fail rate."""
+    from finsight.core.schemas import Citation, FormType  # noqa: PLC0415
+
+    passage = Citation(source_id="S1", kind="passage", chunk_id="c", ticker="AAPL",
+                       form=FormType.TEN_K, fiscal_year=2024, item="7", url="u", quote="q")  # fmt: skip
+    fact = Citation(source_id="S2", kind="fact", ticker="AAPL", fiscal_year=2024, url="u",
+                    quote="q", metric="revenue", xbrl_tag="Revenues")  # fmt: skip
+
+    only_fact = citation_hygiene(ans("x", citations=(fact,)))
+    assert only_fact.citation_kinds == frozenset({"fact"}) and only_fact.clean
+
+    both = citation_hygiene(ans("x", citations=(passage, fact)))
+    assert both.citation_kinds == frozenset({"passage", "fact"}) and both.clean
+
+    none = citation_hygiene(ans("x", citations=()))
+    assert none.citation_kinds == frozenset()

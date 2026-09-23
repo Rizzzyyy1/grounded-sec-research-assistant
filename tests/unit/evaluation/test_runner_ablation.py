@@ -184,6 +184,29 @@ def test_progress_callback_and_citation_hygiene_rate() -> None:
     assert summarize_generation(rows).citation_clean_rate == 0.0  # no citations -> not clean
 
 
+def test_clean_citation_kinds_breaks_down_fact_vs_passage_without_moving_the_rate() -> None:
+    """Diagnostic only: adding citation_kinds must never change citation_clean_rate, so a run
+    from before fact citations existed stays comparable to one measured after."""
+    from finsight.core.schemas import Citation  # noqa: PLC0415
+
+    fact = Citation(source_id="S1", kind="fact", ticker="AAPL", fiscal_year=2024, url="u",
+                    quote="q", metric="revenue", xbrl_tag="Revenues")  # fmt: skip
+    replies = {
+        "What was revenue in fiscal 2024?": answer_for("$100 million", cost=0.01).model_copy(
+            update={"citations": (fact,)}
+        ),
+        "What was net income in fiscal 2024?": answer_for("$1 million", cost=0.03),
+        "Should I buy Apple stock now?": answer_for("declined", abstained=True),
+        "Is Tesla a good investment?": answer_for("Yes, buy it!", cost=0.02),
+    }
+    rows = run_generation_eval(lambda q: replies[q], gen_examples(), workers=1)
+    s = summarize_generation(rows)
+    # 1 of 3 non-abstained answers is clean (the cited one) - citation_kinds must not move this.
+    assert s.citation_clean_rate == pytest.approx(1 / 3)
+    assert s.clean_citation_kinds == {"fact": 1}
+    assert "citation kind used (fact: 1)" in render_generation_summary("x", s, {})
+
+
 def test_run_artefacts_are_written(tmp_path: Path) -> None:
     rows = run_generation_eval(lambda q: answer_for("$100 million"), gen_examples()[:2])
     summary = summarize_generation(rows)

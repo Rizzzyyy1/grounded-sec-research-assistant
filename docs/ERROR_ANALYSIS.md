@@ -82,6 +82,7 @@ generative layer has something to add.
 | 24 | A tool argument given as a JSON-*string* array (e.g. `fiscal_years: "[2024]"` instead of `[2024]`) crashed with `invalid literal for int() with base 10: '['` | Agent smoke test, `--llm ollama` (§3c) | `agent/tools._as_list` accepts a list, a JSON-encoded string, or a bare scalar |
 | 25 | Asking for a ratio (`roe`) through `get_financial_metric` failed with only a list of *reported* metric names, giving the model nothing to recover with | Agent smoke test, `--llm ollama` (§3c) | `_metric` names `compute_ratio` explicitly when the requested name is a known ratio; `test_errors_are_actionable_for_the_model` |
 | 26 | **A citation the model wrote that resolved to no real source stayed in the *displayed* answer.** `validate_citations` already flagged it as invalid, but only in `warnings` - the raw text (what the CLI/API/UI actually shows) still had `"... $45,754 million. [S1]"` even though no `search_filings` call that run had ever registered an `S1`. Most common on numeric-tool answers: the prompt says tool figures need no bracket, so any bracket the model adds there is definitionally unresolvable | Live `finsight serve --llm ollama` query, "What was Coca-Cola revenue in 2023?" → `citations: []`, `warnings: ["citation to unknown source S1"]`, but `text` still ended in `[S1]` | `generation/citations.py::repair_citations` rewrites every bracket to only ever show labels present in `report.citations`; a bracket left with none becomes `[unverified]` - the claim stays, the fake pointer doesn't. Wired into both `generation/pipeline.py` and `agent/orchestrator.py` (the one shared rule, not a per-question patch). 6 new tests in `test_context_citations.py` (valid / unknown / duplicate-in-bracket / duplicate-across-sentences / mixed valid+invalid / zero-evidence-available); re-running `agent-ollama-natural` after the fix reproduced identical accuracy (0.808) and citation hygiene (7.7%) - this is a display fix, not a scoring change - and showed 7 of 38 stored answers changed text, 6 of them exactly this bug (`reports/runs/20260922-214435-agent-ollama-natural-citation-fix/`) |
+| 27 | **`compare_companies` returning a bare `"cite_as": null` next to a real, correct value - with no formula, no inputs and no explanation visible for that row - was read by the model as "the value is missing", not "the citation is missing".** Combined with the system prompt's own permission to "say so plainly" when "a tool says the data is not available", the model answered "not available" for a company whose number the tool had in fact returned correctly, on both natural-probe `comparison` questions it was asked (§3d) | Natural-probe accuracy fell 0.808 → 0.731 after fact citations were added (row order below), both losses in `comparison` type; reproduced deterministically outside the eval harness by calling `compare_companies` and `ResearchAgent.answer` directly on the same two questions (§3d) | `_ValueResult` gives `compare_companies` the same formula + per-input-citation structure `compute_ratio` already had, plus an explicit `"note"` distinguishing "uncited" from "missing"; the system prompt's abstention guidance now says a null citation is about the citation only, and "not available" should follow an actual tool error, never a null field. `test_compare_companies_ratio_keeps_the_value_unambiguous_with_no_citation` reproduces the exact payload shape (a company with no catalogued filing) and asserts value/formula/inputs stay present regardless |
 
 ## 3b. Natural-phrasing probe (router and RAG baseline on `gold_v2_draft`, 38 questions)
 
@@ -120,11 +121,13 @@ gold data - never added to `data/eval/`). Full trace: `reports/smoke_test_agent_
 * **Citation and grounding weaknesses a 3B model has that Claude is expected not to have (untested
   claim - no `--llm claude` run exists to compare against).** Quantified, not just anecdotal: the
   share of answers with a valid citation and no flagged claim/figure is **4.2% (dev) / 0.0% (test) /
-  7.7% (natural)**, against the router's 36.8-38.6% and the extractive baseline's 96.6-100% (which
-  can only ever quote, so it is close to 100% by construction) - see "Citation hygiene" in
-  [RESULTS](../reports/RESULTS.md). None of these percentages moved after the fix below - they
-  count an unresolvable citation as a hygiene failure either way; what changed is what the *reader*
-  sees when one happens. Observed on repeated runs: (a) a
+  7.7% (natural) as first measured here** - since superseded on the natural probe by §3d below
+  (22.2%, after the numeric-fact citation fix; dev/test not yet re-measured) - against the router's
+  36.8-38.6% and the extractive baseline's 96.6-100% (which can only ever quote, so it is close to
+  100% by construction) - see "Citation hygiene" in [RESULTS](../reports/RESULTS.md). None of these
+  percentages moved after the display fix immediately below (row 26) - it counted an unresolvable
+  citation as a hygiene failure either way; what changed there was only what the *reader* sees when
+  one happens; §3d's fix is different and did move them. Observed on repeated runs: (a) a
   bogus `[S1]`-style citation appended to a *tool-sourced* number, where the prompt explicitly says
   figures from tools need no bracket - `validate_citations` correctly flagged this as "citation to
   unknown source" in `warnings`, but until row 26 above the displayed answer still showed the raw,
@@ -151,11 +154,97 @@ gold data - never added to `data/eval/`). Full trace: `reports/smoke_test_agent_
   1.0) and `computed_metric` (0.125 vs 1.0) - the ROE-style tool-confusion above, which persists at
   `temperature=0` even after the better error message (see the full trace for the exact turn where
   it gives up instead of retrying). On the **natural-phrasing probe** (`gold_v2_draft`, same file,
-  same moment, current code) the two are statistically indistinguishable instead (paired diff
-  -0.038, CI crosses zero, McNemar p=1.0). Both comparisons beat the extractive baseline decisively
-  (test: +0.529, CI [0.35, 0.71]; natural: +0.385, CI [0.19, 0.58]). Any summary that reports only
-  one of the two router comparisons is telling half the story. Exact numbers:
+  current code as of 3d below) the two are statistically indistinguishable instead (paired diff
+  -0.077, CI crosses zero, McNemar p=0.6875). Both comparisons beat the extractive baseline
+  decisively (test: +0.529, CI [0.35, 0.71]; natural: +0.346, CI [0.15, 0.54]). Any summary that
+  reports only one of the two router comparisons is telling half the story. Exact numbers:
   [RESULTS](../reports/RESULTS.md).
+
+## 3d. Source provenance for tool-derived facts (why citation hygiene was structurally near-zero, and a regression found while fixing it)
+
+§3c measured citation hygiene at 4.2% (dev) / 0.0% (test) / 7.7% (natural) and treated it as a
+property of the model. Tracing where a citation is actually *lost* showed it was structural, not
+(only) a model weakness: `get_financial_metric`, `compute_ratio` and `compare_companies` read real,
+traceable data - a `FinancialFact` carries `ticker`, `metric`, `tag`, `accession` and `form` - but
+that provenance was discarded before the JSON reached the model. Only `search_filings` and
+`get_risk_factor_changes` ever called `SourceRegistry.label()` to mint a citable `S`-id; the prompt
+told the model tool figures "need no bracket" at all. A numeric answer - the majority of every
+gold set - could therefore *never* produce a `Citation`, regardless of how correct or
+tool-verified its figure was. `citation_hygiene`'s `has_citation` bit was reachable almost only via
+a passage.
+
+**The fix is general, not per-tool:** `agent/tools.py::_register_fact` gives any `FinancialFact` a
+citation label the same way `SourceRegistry` already labelled chunks - `generation/context.py`
+gained `FactSource` alongside the existing `Source`, and `core/schemas.py::Citation` gained
+`kind: "passage" | "fact"` plus fact-only fields (`metric`, `xbrl_tag`), `chunk`-only fields
+(`chunk_id`, `form`, `item`) now optional. The label resolves through `FactStore.filing_url()`
+(new: `SELECT url FROM filings WHERE accession = ?`) - **never fabricated**: a fact whose accession
+has no catalogued filing row gets `source_id: null`, not a guessed URL. For a calculated value
+(a ratio, or a ranked comparison), *every contributing fact* is registered and citable
+individually (`cite_as` is a ready-made multi-label bracket, e.g. `[S1, S2]`) rather than
+inventing one citation for the calculation - a ratio can combine facts from two different filings
+(year-over-year growth spans two 10-Ks), and one `Citation` cannot resolve to two URLs.
+
+**A live query proved the mechanism end to end.** `finsight serve --llm ollama`, "What was
+Coca-Cola revenue in 2023?": `text` now reads `"...$45,754 million. [S1]"` where `[S1]` is a real
+`Citation(kind="fact", url="https://www.sec.gov/Archives/edgar/data/21344/.../ko-20251231.htm", ...)`
+(HTTP 200, confirmed) instead of the row-26 `[unverified]`. A ratio question ("Using compute_ratio,
+what is Apple gross margin for fiscal 2024?") cited both inputs together, `[S1, S2]`, each
+resolving to Apple's FY2024 10-K.
+
+**Regression, found by re-measuring rather than assuming the fix was free.** Re-running
+`agent-ollama-natural` after adding fact citations: citation hygiene rose 7.7% → 23.1%, but
+accuracy *fell* 0.808 → 0.731, entirely in `comparison`-type questions (`nat-ratio-*`/
+`computed_metric` had already been at 0.000 since before this session's work and did not move -
+verified by diffing every question's `correct` field against the pre-fix baseline, not by
+re-reading the headline number). Root cause is row 27 above: `compare_companies` put a bare
+`"cite_as": null` next to PG's correctly-computed net margin (17.7%) with no formula, no inputs
+and no note - PG's FY2024 facts trace to accession `0000080424-26-000103` (its FY2026 10-K,
+reporting FY2024 as a prior-year comparative column), which was never catalogued as a downloaded
+filing, so `_register_fact` correctly returned `None` for every input. The model read that `null`
+as "the value is missing" and, primed by the prompt's own "if a tool says the data is not
+available, say so plainly" line, answered `"The net margin for Procter & Gamble in 2024 was not
+available"` - discarding a number the tool had already computed correctly. Reproduced
+deterministically outside the eval harness (`dispatch(ctx, "compare_companies", ...)` and
+`ResearchAgent.answer(...)` called directly on the same question, no eval framework involved) so
+the mechanism, not just the symptom, is demonstrated.
+
+**The fix keeps the citation strict and makes the value unambiguous instead of relaxing anything.**
+`compare_companies` now returns the same shape `compute_ratio` already did - `formula` once,
+`inputs` per company (each fact's own `metric`, `value`, `formatted`, `xbrl_tag`, `source_id`) -
+plus an explicit `"note"` field: *"value and formatted are the real reported or calculated result
+... always state them ... cite_as is null only when this run could not trace the underlying
+fact(s) to a catalogued filing ... never a sign the value itself is missing."* The system prompt
+was tightened to match: a null citation is "about the citation only", and "not available" must
+follow an actual tool error, never a null field. Re-running the natural probe after this fix:
+accuracy 0.731 → 0.769, citation hygiene 23.1% → 22.2% (both stable within a couple of questions of
+each other; the movement worth reading is against the pre-fact-citation baseline, not between these
+two intermediate points). One of the two comparison regressions is now byte-identical to the
+pre-regression answer (`nat-cmp-015`); the other (`nat-cmp-016`) now states both real numbers with
+zero fabrication and zero warnings but still opens with `INSUFFICIENT_EVIDENCE` on the *comparative
+judgement* ("whose is better") - a distinct, unresolved caution the small model applies whenever one
+side of a comparison is uncited, which the strict grader scores incorrect (`expected.abstain=False`)
+even though the numbers it surfaces are exactly right. Not patched further: a change narrow enough
+to make this one question pass would not generalise, and risks tuning against the probe (see
+`scripts/make_gold_v2_draft.py`'s own warning against exactly that).
+
+**Net effect vs. the original, pre-session baseline** (`reports/runs/20260922-052052-agent-ollama-natural/`
+vs `reports/runs/20260923-000522-agent-ollama-natural/`, both `--workers 1`, identical model/settings):
+citation hygiene **7.7% → 22.2%** (≈3×) for a natural-probe accuracy cost of **0.808 → 0.769** (one
+question, `nat-cmp-016`, now correctly grounded but over-cautious rather than wrong). `computed_metric`
+(the `nat-ratio-*` rows) stayed at 0.000 throughout every stage measured here - a pre-existing weakness,
+unrelated to and unmoved by this work; not yet diagnosed.
+
+**Known, disclosed gap: not every fact can be cited even when correct.** Of 60 (ticker, year)
+revenue facts checked across the universe (2021-2025), 52 (86.7%) resolve to a catalogued filing;
+the 8 misses cluster in MSFT/NVDA/PG/WMT's most recent 1-2 fiscal years, each tracing to a 10-K
+filed in 2026 that reports that year as a prior-year comparative column and was never itself
+downloaded by `finsight ingest` (which catalogues the primary 10-K per fiscal year, not every
+filing that later restates it). This is a real ingestion-catalogue completeness gap, not a citation
+defect: extending the catalogue to cover every accession `fact_versions` references would need a
+live EDGAR fetch per missing accession (out of scope here - no network side effects beyond what
+`finsight ingest` already does were introduced in this pass) and is the natural next step, not a
+"fix" to backfill by relaxing the never-fabricate rule.
 
 ## 4. Design changes forced by evidence
 

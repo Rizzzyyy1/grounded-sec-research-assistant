@@ -205,6 +205,13 @@ class FactStore:
         """The filing catalogue, oldest first per company."""
         return self.sql("SELECT * FROM filings ORDER BY ticker, period_of_report")
 
+    def filing_url(self, accession: str) -> str | None:
+        """The primary document URL for one filing, or ``None`` if it was never catalogued."""
+        row = self._con.execute(
+            "SELECT url FROM filings WHERE accession = ?", [accession]
+        ).fetchone()
+        return row[0] if row else None
+
     def tickers(self) -> list[str]:
         return list(self.sql("SELECT DISTINCT ticker FROM facts ORDER BY 1")["ticker"])
 

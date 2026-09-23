@@ -203,16 +203,26 @@ class FinancialFact(_Model):
 
 # --------------------------------------------------------------------------- generation
 class Citation(_Model):
-    """A verified pointer from an answer sentence to a source passage."""
+    """A verified pointer from an answer to evidence this run actually produced.
+
+    Two kinds share this shape: ``"passage"`` is a retrieved filing excerpt (the original design);
+    ``"fact"`` is one reported XBRL value - used directly, or as one input to a calculation (a
+    ratio cites every fact it was computed from, each with its own ``Citation``). Both resolve to
+    a real, single filing URL; a citation is never synthesised for a value spanning more than one
+    filing (e.g. a two-year growth rate) - it cites the individual facts instead.
+    """
 
     source_id: str = Field(pattern=r"^S\d+$", description="Label used in the answer, e.g. 'S2'.")
-    chunk_id: str
+    kind: Literal["passage", "fact"] = "passage"
     ticker: str
-    form: FormType
     fiscal_year: int
-    item: str
-    url: str
-    quote: str = Field(description="The supporting passage, trimmed for display.")
+    url: str = Field(description="Where a reader can check this citation against the source.")
+    quote: str = Field(description="The supporting passage or fact, described for display.")
+    chunk_id: str | None = Field(default=None, description="Set when kind == 'passage'.")
+    form: FormType | None = None
+    item: str | None = Field(default=None, description="10-K/10-Q Item; kind == 'passage'.")
+    metric: str | None = Field(default=None, description="Canonical metric name; kind == 'fact'.")
+    xbrl_tag: str | None = Field(default=None, description="Raw XBRL concept; kind == 'fact'.")
 
 
 class ToolCallRecord(_Model):

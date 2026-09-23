@@ -420,9 +420,9 @@ def ask(
     if answer.abstained:
         console.print(f"[yellow]abstained[/] ({answer.abstain_reason})")
     for c in answer.citations:
-        console.print(
-            f"[cyan][{c.source_id}][/] {c.ticker} {c.form.value} FY{c.fiscal_year}, Item {c.item}"
-        )
+        form = c.form.value if c.form else "?"
+        where = f"{c.metric} (XBRL)" if c.kind == "fact" else f"{form}, Item {c.item}"
+        console.print(f"[cyan][{c.source_id}][/] {c.ticker} FY{c.fiscal_year}, {where}")
         if sources:
             console.print(f"    [dim]{escape(c.quote)}[/]")
     for w in answer.warnings:

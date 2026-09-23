@@ -127,6 +127,11 @@ class GenerationSummary:
     total_cost_usd: float
     cost_per_query_usd: float
     per_example_correct: dict[str, float] = field(default_factory=dict)
+    #: Diagnostic only - never part of `clean`. Among *clean* answers, how many cited at least one
+    #: fact (agent/tools.py::_register_fact) vs. at least one retrieved passage; a hybrid answer
+    #: counts in both. Distinguishes "citation hygiene rose because numeric answers can now cite
+    #: at all" from "... because the system got better at citing passages" - see EVALUATION.md 3.2.
+    clean_citation_kinds: dict[str, int] = field(default_factory=dict)
 
 
 def summarize_generation(rows: Sequence[GenerationRow]) -> GenerationSummary:
@@ -138,6 +143,11 @@ def summarize_generation(rows: Sequence[GenerationRow]) -> GenerationSummary:
     pairs = [(r.example, r.answer) for r in answered if r.answer is not None]
     ab = abstention_scores(pairs)
     hygienic = [r.hygiene for r in answered if r.hygiene is not None]
+    clean_kinds: dict[str, int] = defaultdict(int)
+    for h in hygienic:
+        if h.clean:
+            for kind in h.citation_kinds:
+                clean_kinds[kind] += 1
     p50, p95 = latency_percentiles([r.answer.latency_ms for r in answered if r.answer])
     cost = sum(r.answer.usage.cost_usd for r in answered if r.answer)
     return GenerationSummary(
@@ -150,4 +160,5 @@ def summarize_generation(rows: Sequence[GenerationRow]) -> GenerationSummary:
         p50_latency_ms=p50, p95_latency_ms=p95, total_cost_usd=cost,
         cost_per_query_usd=cost / len(answered) if answered else 0.0,
         per_example_correct={r.example.id: float(bool(r.correct)) for r in scored},
+        clean_citation_kinds=dict(clean_kinds),
     )  # fmt: skip

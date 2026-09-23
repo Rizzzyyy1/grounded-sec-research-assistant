@@ -162,10 +162,24 @@ this run produced) always counts as a hygiene failure under this rule, whether o
 answer text* happened to show the broken bracket - `generation/citations.py::repair_citations`
 rewrites that bracket to `[unverified]` before the answer reaches a user, but it does not and
 cannot change whether the metric above treats the answer as clean (ERROR_ANALYSIS.md row 26).
-Confirmed by re-running `agent-ollama-natural` (`data/eval/gold_v2_draft.jsonl`) after the fix:
-accuracy 0.808 and citation hygiene 7.7%, identical to the pre-fix run -
+Confirmed by re-running `agent-ollama-natural` (`data/eval/gold_v2_draft.jsonl`) right after that
+display-only fix: accuracy 0.808 and citation hygiene 7.7%, identical to the pre-fix run -
 `reports/runs/20260922-214435-agent-ollama-natural-citation-fix/` vs
-`reports/runs/20260922-052052-agent-ollama-natural/`.
+`reports/runs/20260922-052052-agent-ollama-natural/` - confirming the metric had never rewarded the
+bug the display fix removed.
+
+That 7.7% ceiling turned out to be mostly structural, not a model weakness: only
+`search_filings`/`get_risk_factor_changes` ever minted a citation label, so a numeric answer -
+the majority of any gold set - could never produce a `Citation` no matter how correct or
+tool-verified its figure was (`has_citation` was almost unreachable outside a passage). Extending
+citation labels to XBRL facts (`agent/tools.py::_register_fact`, `Citation.kind: "passage" |
+"fact"`, ERROR_ANALYSIS.md 3d) measured, on the same natural probe, citation hygiene **7.7% →
+22.2%** for an accuracy cost of **0.808 → 0.769** (one question, now correctly grounded but
+over-cautious rather than wrong - see 3d for the full regression story, including a real bug found
+and fixed along the way, and why dev/test have not yet been re-measured against this fix).
+`CitationHygiene.citation_kinds` (diagnostic only, does not affect `clean`) now records whether a
+clean answer's citation was a `fact`, a `passage`, or both, so a future report can tell which kind
+of grounding actually improved rather than reading one aggregate rate.
 
 ### 3.3 System
 

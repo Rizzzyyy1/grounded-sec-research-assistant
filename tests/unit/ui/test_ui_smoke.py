@@ -16,8 +16,9 @@ ANSWER = {
         "question": "q", "text": "Apple's revenue for fiscal 2024 was $391,035 million.", "abstained": False,
         "abstain_reason": None, "model": "router-v1", "query_type": "numeric", "latency_ms": 12.0,
         "usage": {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}, "warnings": [],
-        "citations": [{"source_id": "S1", "ticker": "AAPL", "form": "10-K", "fiscal_year": 2024, "item": "7",
-                       "url": "https://sec.gov/x", "quote": "Net sales were $391,035 million."}],
+        "citations": [{"source_id": "S1", "kind": "passage", "ticker": "AAPL", "form": "10-K", "fiscal_year": 2024,
+                       "item": "7", "url": "https://sec.gov/x", "quote": "Net sales were $391,035 million.",
+                       "metric": None}],
         "tool_calls": [{"name": "get_financial_metric", "arguments": {"ticker": "AAPL"}, "latency_ms": 3.0, "is_error": False}],
     },
     "mode": "router", "disclaimer": "Not investment advice.",
@@ -106,6 +107,37 @@ def test_ask_page_renders_answer_sources_and_trace() -> None:
     assert any("$391,035 million" in m.value for m in at.markdown)
     assert any("[S1] AAPL 10-K FY2024" in e.label for e in at.expander)
     assert len(at.dataframe) == 1  # the tool trace
+
+
+def test_ask_page_renders_a_fact_citation_without_a_form_or_item(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fact-kind Citation (agent/tools.py::_register_fact) has no form/item - only a passage
+    does. Regression: the page unconditionally read c['form']/c['item'] and crashed on this."""
+    fact_answer = {
+        **ANSWER,
+        "answer": {
+            **ANSWER["answer"],
+            "citations": [
+                {
+                    "source_id": "S1", "kind": "fact", "ticker": "AAPL", "fiscal_year": 2024,
+                    "url": "https://sec.gov/x", "quote": "Revenue: $391,035 million (XBRL tag Revenues)",
+                    "metric": "revenue", "form": None, "item": None,
+                }
+            ],
+        },
+    }  # fmt: skip
+
+    class FactStubClient(StubClient):
+        def query(self, question: str, mode: str = "auto") -> dict[str, Any]:
+            return fact_answer
+
+    monkeypatch.setattr("finsight.ui.client.ApiClient", FactStubClient)
+    at = run("pages/1_Ask.py")
+    at.text_area[0].set_value("What was Apple's revenue in fiscal 2024?").run()
+    at.button[0].click().run()
+    assert not at.exception
+    assert any("[S1] AAPL FY2024 - revenue (XBRL)" in e.label for e in at.expander)
 
 
 def test_explorer_and_compare_pages_render_charts() -> None:

@@ -145,7 +145,8 @@ erDiagram
     FILING_REF ||--o{ SECTION : "split into"
     SECTION ||--o{ CHUNK : "chunked into"
     FILING_REF ||--o{ FINANCIAL_FACT : "reports"
-    CHUNK ||--o{ CITATION : "supports"
+    CHUNK |o--o{ CITATION : "supports (kind=passage)"
+    FINANCIAL_FACT |o--o{ CITATION : "supports (kind=fact)"
     ANSWER ||--o{ CITATION : "carries"
     ANSWER ||--o{ TOOL_CALL_RECORD : "traced by"
 
@@ -189,8 +190,10 @@ erDiagram
     }
     CITATION {
         string source_id "S1, S2 ..."
-        string chunk_id FK
-        text quote
+        enum kind "passage or fact"
+        string chunk_id FK "set when kind=passage"
+        string metric "set when kind=fact"
+        text quote "trimmed passage, or a fact's value+tag+accession"
     }
     TOOL_CALL_RECORD {
         string name

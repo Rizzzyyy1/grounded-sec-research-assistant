@@ -1,8 +1,10 @@
 """Citation parsing and validation.
 
 The model cites with ``[S1]`` labels. This module checks that every label refers to a source we
-actually provided, turns valid ones into :class:`Citation` objects (with a display quote and the
-filing URL), and finds *uncited* sentences - the claims a reader cannot trace to a passage.
+actually provided - a retrieved passage (:class:`~finsight.generation.context.Source`) or a
+reported XBRL fact (:class:`~finsight.generation.context.FactSource`) - turns valid ones into
+:class:`Citation` objects (with a display quote/detail and a real filing URL), and finds *uncited*
+sentences - the claims a reader cannot trace to either kind of evidence.
 
 ``validate_citations`` alone is not enough to make an answer trustworthy: it reports which labels
 are invalid, but the raw model text still contains them verbatim, so a reader sees what looks like
@@ -18,7 +20,7 @@ import re
 from dataclasses import dataclass
 
 from finsight.core.schemas import Citation
-from finsight.generation.context import Context
+from finsight.generation.context import Context, FactSource, Source
 from finsight.generation.prompts import ABSTAIN_TOKEN
 
 _LABEL_GROUP = re.compile(r"\[\s*(S\d+(?:\s*[,;]\s*S\d+)*)\s*\]", re.IGNORECASE)
@@ -61,6 +63,19 @@ def _trim(text: str) -> str:
     return flat if len(flat) <= _QUOTE_CHARS else flat[: _QUOTE_CHARS - 1].rstrip() + "…"
 
 
+def _to_citation(label: str, source: Source | FactSource) -> Citation:
+    if isinstance(source, FactSource):
+        return Citation(
+            source_id=label, kind="fact", ticker=source.ticker, fiscal_year=source.fiscal_year,
+            url=source.url, quote=source.detail, metric=source.metric, xbrl_tag=source.tag,
+        )  # fmt: skip
+    m = source.chunk.metadata
+    return Citation(
+        source_id=label, kind="passage", chunk_id=source.chunk.id, ticker=m.ticker, form=m.form,
+        fiscal_year=m.fiscal_year, item=m.item, url=m.source_url, quote=_trim(source.chunk.text),
+    )  # fmt: skip
+
+
 def validate_citations(answer: str, context: Context) -> CitationReport:
     citations: list[Citation] = []
     invalid: list[str] = []
@@ -69,14 +84,7 @@ def validate_citations(answer: str, context: Context) -> CitationReport:
         if source is None:
             invalid.append(label)
             continue
-        m = source.chunk.metadata
-        citations.append(
-            Citation(
-                source_id=label, chunk_id=source.chunk.id, ticker=m.ticker, form=m.form,
-                fiscal_year=m.fiscal_year, item=m.item, url=m.source_url,
-                quote=_trim(source.chunk.text),
-            )
-        )  # fmt: skip
+        citations.append(_to_citation(label, source))
 
     uncited: list[str] = []
     if not answer.strip().startswith(ABSTAIN_TOKEN):

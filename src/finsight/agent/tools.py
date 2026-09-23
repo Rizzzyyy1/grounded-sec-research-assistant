@@ -10,6 +10,18 @@
 Each tool returns a JSON document *and* the plain evidence strings that justify it; the agent's
 numeric-consistency check accepts a figure only if it appears in that evidence.
 
+**Every reported fact a numeric tool touches also gets a citation label**, the same ``S1, S2, ...``
+sequence and the same :class:`~finsight.generation.context.Source`/registry machinery
+``search_filings`` already used - see :func:`_register_fact`. A ratio or comparison registers *each
+input fact separately* rather than inventing one citation for the computed result: the result
+often combines facts from different filings (year-over-year growth spans two 10-Ks), and a single
+citation cannot resolve to two URLs, so the model is asked to cite every fact it used, e.g.
+``[S1, S2]``, and the tool JSON already carries the exact formula (``compute_ratio``'s
+``"formula"``) so the calculation itself is visible without being asserted as a citable fact of its
+own. This never fabricates a source: a value this store cannot trace to a catalogued filing gets no
+citation label at all (:func:`_register_fact` returns ``None``), and the model is told a bare
+figure with no ``source_id`` must not be cited.
+
 (``get_price_history`` from the design is intentionally not implemented: it would add a live
 market-data dependency that cannot be verified offline, and the assistant gives no price views.)
 """
@@ -18,7 +30,7 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,7 +40,7 @@ from finsight.analytics.risk_diff import diff_risk_factors
 from finsight.config.universe import Universe
 from finsight.core.filters import RetrievalFilters
 from finsight.core.schemas import Chunk, FinancialFact, FiscalPeriod
-from finsight.generation.context import Context, Source
+from finsight.generation.context import Context, FactSource, Source
 from finsight.ingestion.xbrl.concepts import CANONICAL_METRICS
 from finsight.ingestion.xbrl.store import FactStore
 from finsight.retrieval.retriever import Retriever
@@ -42,18 +54,47 @@ class ToolError(Exception):
 
 @dataclass
 class SourceRegistry:
-    """Assigns stable citation labels to chunks as they surface during one agent run."""
+    """Assigns stable citation labels to chunks and facts as they surface during one agent run.
+
+    Tool calls run concurrently (``orchestrator.py``'s ``ThreadPoolExecutor``), and more than one
+    of them can register a source in the same run - two ``search_filings`` calls, or a
+    ``compute_ratio`` racing a ``get_financial_metric`` - so every mutation is serialised through
+    one lock. Without it, two threads computing ``_next_id()`` from the same pre-mutation lengths
+    could hand out the same label to two different sources, and a citation would silently resolve
+    to the wrong one.
+    """
 
     _by_chunk: dict[str, Source] = field(default_factory=dict)
+    _by_fact: dict[tuple[str, str, int, str], FactSource] = field(default_factory=dict)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
+    def _next_id(self) -> str:
+        return f"S{len(self._by_chunk) + len(self._by_fact) + 1}"
 
     def label(self, chunk: Chunk) -> str:
-        if chunk.id not in self._by_chunk:
-            self._by_chunk[chunk.id] = Source(f"S{len(self._by_chunk) + 1}", chunk)
-        return self._by_chunk[chunk.id].id
+        with self._lock:
+            if chunk.id not in self._by_chunk:
+                self._by_chunk[chunk.id] = Source(self._next_id(), chunk)
+            return self._by_chunk[chunk.id].id
+
+    def label_fact(self, fact: FinancialFact, *, url: str, metric_label: str) -> str:
+        key = (fact.ticker, fact.metric, fact.fiscal_year, fact.fiscal_period.value)
+        with self._lock:
+            if key not in self._by_fact:
+                detail = (
+                    f"{metric_label}: {money(fact.value, fact.unit)} (XBRL tag {fact.tag}, "
+                    f"{fact.form.value} FY{fact.fiscal_year} {fact.fiscal_period.value}, "
+                    f"accession {fact.accession})"
+                )
+                self._by_fact[key] = FactSource(
+                    id=self._next_id(), ticker=fact.ticker, fiscal_year=fact.fiscal_year,
+                    metric=fact.metric, tag=fact.tag, url=url, detail=detail,
+                )  # fmt: skip
+            return self._by_fact[key].id
 
     def context(self) -> Context:
-        sources = tuple(self._by_chunk.values())
-        return Context(sources, "", 0)
+        with self._lock:
+            return Context((*self._by_chunk.values(), *self._by_fact.values()), "", 0)
 
 
 @dataclass
@@ -116,13 +157,38 @@ def _need(ctx: AgentContext, ticker: str, metric: str, year: int) -> FinancialFa
     return fact
 
 
-def _fact_json(f: FinancialFact) -> dict[str, Any]:
+def _fact_json(f: FinancialFact, source_id: str | None) -> dict[str, Any]:
     return {
         "fiscal_year": f.fiscal_year, "fiscal_period": f.fiscal_period.value,
         "value": f.value, "formatted": money(f.value, f.unit), "unit": f.unit,
         "period_end": f.end.isoformat(), "form": f.form.value, "accession": f.accession,
-        "xbrl_tag": f.tag, "derived_by_finsight": f.derived,
+        "xbrl_tag": f.tag, "derived_by_finsight": f.derived, "source_id": source_id,
     }  # fmt: skip
+
+
+def _register_fact(ctx: AgentContext, fact: FinancialFact) -> str | None:
+    """Give one reported fact a citation label, or ``None`` if its filing was never catalogued.
+
+    Never fabricates a source: a fact whose accession has no row in the ``filings`` table (an
+    incomplete ingest) gets no citation label at all rather than a guessed or broken URL. The
+    agent is told a ``source_id: null`` value must be stated but not cited.
+    """
+    with ctx.db_lock:
+        url = ctx.facts.filing_url(fact.accession)
+    if url is None:
+        return None
+    label = (
+        CANONICAL_METRICS[fact.metric].label if fact.metric in CANONICAL_METRICS else fact.metric
+    )
+    return ctx.registry.label_fact(fact, url=url, metric_label=label)
+
+
+def _cite_as(source_ids: Iterable[str | None]) -> str | None:
+    """The exact bracket to paste when citing a value derived from several facts, e.g. a ratio -
+    every distinct, resolvable source that went into it, in first-seen order. ``None`` when none
+    of the inputs could be given a citation at all."""
+    unique = list(dict.fromkeys(sid for sid in source_ids if sid))
+    return f"[{', '.join(unique)}]" if unique else None
 
 
 def _dump(payload: Mapping[str, Any]) -> str:
@@ -171,8 +237,12 @@ def get_financial_metric(ctx: AgentContext, args: Mapping[str, Any]) -> ToolOutp
         raise ToolError(f"no {metric} data for {ticker} ({period.value}) in the requested years")
     payload = {
         "ticker": ticker, "metric": metric, "label": CANONICAL_METRICS[metric].label,
-        "values": [_fact_json(f) for f in facts],
-        "note": "values are as reported in the filings (XBRL); latest restated value per period",
+        "values": [_fact_json(f, _register_fact(ctx, f)) for f in facts],
+        "note": "values are as reported in the filings (XBRL); latest restated value per period. "
+                "Every value here is real and present regardless of source_id. Cite a value's own "
+                "source_id (e.g. [S1]) when you state it; a null source_id only means this run "
+                "could not resolve a citation for it - state the figure plainly, never as "
+                "unavailable, and do not invent a bracket for it.",
     }  # fmt: skip
     evidence = tuple(
         x for f in facts for x in (money(f.value, f.unit), f"{f.value:,.0f}", f"{f.value}")
@@ -198,28 +268,78 @@ def compute_ratio_tool(ctx: AgentContext, args: Mapping[str, Any]) -> ToolOutput
     except RatioError as exc:
         raise ToolError(str(exc)) from exc
     formatted = format_value(value, spec.kind)
+    input_facts = (*current.items(), *prior.items())
+    source_ids: list[str | None] = [_register_fact(ctx, f) for _m, f in input_facts]
+    inputs = [
+        {"metric": m, "fiscal_year": f.fiscal_year, "value": f.value,
+         "formatted": money(f.value, f.unit), "xbrl_tag": f.tag, "source_id": sid}
+        for (m, f), sid in zip(input_facts, source_ids, strict=True)
+    ]  # fmt: skip
     payload = {
         "ticker": ticker, "fiscal_year": year, "ratio": name, "label": spec.label,
         "value": value, "formatted": formatted, "formula": spec.formula,
-        "inputs": [{"metric": m, "fiscal_year": f.fiscal_year, "value": f.value,
-                    "formatted": money(f.value, f.unit), "xbrl_tag": f.tag}
-                   for m, f in (*current.items(), *prior.items())],
+        "inputs": inputs,
+        "cite_as": _cite_as(source_ids),
+        "note": "value and formatted are the real calculated result (see formula) and are always "
+                "present regardless of cite_as - state them plainly, never as unavailable. cite_as "
+                "is every input's source_id together (e.g. [S1, S2]); it is null only when none of "
+                "the inputs could be traced to a catalogued filing, never a sign the value is "
+                "missing. Never invent one citation for the calculation itself.",
     }  # fmt: skip
     evidence = (formatted, f"{value:.4f}", f"{value * 100:.1f}", f"{value:.2f}",
                 *(money(f.value) for f in (*current.values(), *prior.values())))  # fmt: skip
     return ToolOutput(_dump(payload), evidence)
 
 
-def _value_for(ctx: AgentContext, ticker: str, name: str, year: int) -> tuple[float, str, str]:
-    """(value, formatted, label) for a metric or a ratio."""
+@dataclass(frozen=True)
+class _ValueResult:
+    """A metric or ratio value, kept apart from its citation so the two can never be confused:
+    ``value``/``formatted`` are the real answer and are always present; ``cite_as`` is ``None``
+    only when this run could not trace it to a catalogued filing - never a sign the value itself
+    is missing. ``formula``/``inputs`` are set only for a ratio, mirroring ``compute_ratio``'s own
+    payload shape so a comparison is exactly as inspectable as a single-company ratio call."""
+
+    value: float
+    formatted: str
+    label: str
+    cite_as: str | None
+    formula: str | None = None
+    inputs: tuple[dict[str, Any], ...] = ()
+
+
+def _value_for(ctx: AgentContext, ticker: str, name: str, year: int) -> _ValueResult:
     if name in RATIOS:
         spec = RATIOS[name]
-        cur = {m: _need(ctx, ticker, m, year).value for m in spec.inputs}
-        prior = {m: _need(ctx, ticker, m, year - 1).value for m in spec.prior_inputs}
-        value = compute_ratio(name, cur, prior)
-        return value, format_value(value, spec.kind), spec.label
+        cur = {m: _need(ctx, ticker, m, year) for m in spec.inputs}
+        prior = {m: _need(ctx, ticker, m, year - 1) for m in spec.prior_inputs}
+        value = compute_ratio(
+            name, {m: f.value for m, f in cur.items()}, {m: f.value for m, f in prior.items()}
+        )
+        input_facts = (*cur.items(), *prior.items())
+        source_ids = [_register_fact(ctx, f) for _m, f in input_facts]
+        inputs = tuple(
+            {"metric": m, "fiscal_year": f.fiscal_year, "value": f.value,
+             "formatted": money(f.value, f.unit), "xbrl_tag": f.tag, "source_id": sid}
+            for (m, f), sid in zip(input_facts, source_ids, strict=True)
+        )  # fmt: skip
+        return _ValueResult(
+            value, format_value(value, spec.kind), spec.label, _cite_as(source_ids),
+            formula=spec.formula, inputs=inputs,
+        )  # fmt: skip
     fact = _need(ctx, ticker, _metric(name), year)
-    return fact.value, money(fact.value, fact.unit), CANONICAL_METRICS[name].label
+    sid = _register_fact(ctx, fact)
+    return _ValueResult(
+        fact.value, money(fact.value, fact.unit), CANONICAL_METRICS[name].label, _cite_as([sid])
+    )
+
+
+_VALUE_NOTE = (
+    "value and formatted are the real reported or calculated result for that company - always "
+    "state them, in the fiscal year and unit shown here, without converting or re-deriving them. "
+    "cite_as is null only when this run could not trace the underlying fact(s) to a catalogued "
+    "filing; that means the number is uncited, never that the number itself is missing - do not "
+    "say a value is unavailable just because cite_as is null."
+)
 
 
 def compare_companies(ctx: AgentContext, args: Mapping[str, Any]) -> ToolOutput:
@@ -228,24 +348,45 @@ def compare_companies(ctx: AgentContext, args: Mapping[str, Any]) -> ToolOutput:
         raise ToolError("compare_companies needs at least two tickers")
     name, year = str(args["metric"]), int(args["fiscal_year"])
     values: dict[str, float] = {}
-    formatted: dict[str, str] = {}
+    results: dict[str, _ValueResult] = {}
     skipped: dict[str, str] = {}
-    label = name
+    label, formula = name, None
     for t in tickers:
         try:
-            values[t], formatted[t], label = _value_for(ctx, t, name, year)
+            result = _value_for(ctx, t, name, year)
+            values[t], results[t], label, formula = (
+                result.value,
+                result,
+                result.label,
+                result.formula,
+            )
         except (ToolError, RatioError) as exc:
             skipped[t] = str(exc)
     if len(values) < 2:
         raise ToolError(f"fewer than two companies have {name} for fiscal {year}: {skipped}")
     rows = peer_table(values)
-    payload = {
-        "metric": name, "label": label, "fiscal_year": year,
-        "ranking": [{"rank": r.rank, "ticker": r.ticker, "value": r.value,
-                     "formatted": formatted[r.ticker], "percentile": r.percentile} for r in rows],
+    ranking = []
+    for row_rank in rows:
+        result = results[row_rank.ticker]
+        row = {
+            "rank": row_rank.rank, "ticker": row_rank.ticker, "value": row_rank.value,
+            "formatted": result.formatted, "percentile": row_rank.percentile,
+            "cite_as": result.cite_as,
+        }  # fmt: skip
+        if result.inputs:
+            row["inputs"] = result.inputs
+        ranking.append(row)
+    payload: dict[str, Any] = {
+        "metric": name,
+        "label": label,
+        "fiscal_year": year,
+        "ranking": ranking,
         "skipped": skipped,
-    }  # fmt: skip
-    return ToolOutput(_dump(payload), tuple(formatted.values()))
+        "note": _VALUE_NOTE,
+    }
+    if formula:
+        payload["formula"] = formula
+    return ToolOutput(_dump(payload), tuple(r.formatted for r in results.values()))
 
 
 def search_filings(ctx: AgentContext, args: Mapping[str, Any]) -> ToolOutput:
