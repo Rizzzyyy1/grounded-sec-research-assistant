@@ -131,9 +131,9 @@ Once you've worked through a row:
   checked, rename the file to `data/eval/gold_v2.jsonl`, and update `docs/EVALUATION.md §2.2` and
   this file's own status line to say so. Re-run the evaluations that used the draft file
   (`agent-ollama-natural`, `router-natural-refresh`, `rag-extractive-natural-refresh` in
-  `reports/runs/`) against the verified file and report the new numbers as the first genuinely
-  clean measurement on this question set - explicitly distinct from the in-sample post-guardrail-fix
-  numbers already in the README.
+  `reports/runs/`) against the verified file and report the new numbers as an in-sample evaluation with reviewed labels. Label review
+  does not undo development exposure or turn this set into a clean holdout. Use the separately
+  proposed `holdout_v1_draft` only after the review described in `HOLDOUT_V1_DESIGN.md`.
 
 ## What this checklist is not
 

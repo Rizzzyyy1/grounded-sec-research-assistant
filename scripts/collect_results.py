@@ -142,8 +142,8 @@ def citation_hygiene_section() -> list[str]:
         "against the immediately prior run each time, including the audit's own fix). The audit's "
         "fix traded coverage for precision by design - an earlier, unaudited pass of the fourth fix "
         "briefly reached 55.0% before the false-attribution risk it carried was found and closed. "
-        "**The dev column has not been re-measured against any of the four** - expect a comparable "
-        "rise, not the value shown.",
+        "**The dev column has not been re-measured against any of the four**; no improvement "
+        "is claimed until it is measured.",
         "",
         "| System | dev | test |",
         "|---|---|---|",
@@ -211,8 +211,8 @@ def ollama_agent_section() -> list[str]:
                 stats_lines.append(f"* **{label}** (natural phrasing, `gold_v2_draft`): {result}")
     if stats_lines:
         lines += [
-            "On the 38-question natural-phrasing probe (same file and current code as the router/RAG "
-            "baselines above, so this is a same-moment, apples-to-apples comparison):",
+            "On the 38-question natural-phrasing probe (used to develop fixes; this comparison is "
+            "in-sample, not an independent holdout):",
             "",
             *stats_lines,
             "",
@@ -242,12 +242,12 @@ def natural_section() -> list[str]:
         "",
         "### Templated vs natural phrasing (`gold_v2_draft`, 38 questions, unverified draft labels)",
         "",
-        "| System | `gold_v1` templated | natural, **before** the guardrail fix (clean) "
+        "| System | `gold_v1` templated | natural, **before** the guardrail fix (historical) "
         "| natural, after the fix (**in-sample**) |",
         "|---|---|---|---|",
         *rows,
         "",
-        "The middle column is the clean measurement: numeric expectations come from the XBRL store "
+        "The middle column is the historical pre-fix measurement: numeric expectations come from the XBRL store "
         "and it was taken before any system change was made in response to these questions. The probe "
         "then exposed a hole in the advice guardrail (all 4 naturally phrased advice requests slipped "
         "through; abstention recall 3/9 -> 7/9 after the fix), which was fixed and the probe re-run. That last column is **in-sample** (the fix was designed "

@@ -119,7 +119,8 @@ stays a `draft` until a human has checked every label. Two results are recorded 
 [RESULTS](../reports/RESULTS.md): the tool router falls from 0.94 (templated test) to 0.69 on natural
 phrasing, and the advice guardrail had a hole (all 4 naturally phrased advice requests slipped through) that
 templated questions could not reveal. The post-fix re-run is **in-sample** because the fix was written
-from these questions; only the pre-fix column is a clean measurement.
+from these questions; the pre-fix column is a historical measurement before those fixes. Human label review cannot
+undo development exposure; future evaluations on this file remain in-sample.
 
 Turning this into `gold_v2` needs a human to verify every label - see
 [GOLD_V2_REVIEW_CHECKLIST.md](GOLD_V2_REVIEW_CHECKLIST.md) for the exact procedure,

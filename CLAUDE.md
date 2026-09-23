@@ -1,11 +1,11 @@
-# FinSight — working notes for Claude Code
+# FinSight — Contributor instructions for Claude Code
 
 Grounded financial research assistant (RAG over SEC filings + XBRL analytics + Claude agent).
 Read `docs/DESIGN.md` first; `docs/ROADMAP.md` says which phase is current.
 
 ## Commands
 ```bash
-make install     # venv (.venv, Python 3.13) + every runtime extra + dev tooling
+make install     # venv (.venv, Python 3.13) + runtime dependencies + dev tooling
 make check       # ruff + ruff format --check + mypy --strict + arch + pytest  (== CI)
 make test        # hermetic tests only; -m "not network and not llm and not slow"
 make arch        # import-linter architecture contracts (docs/ARCHITECTURE.md section 3)
@@ -37,54 +37,18 @@ make doctor      # finsight doctor: env, credentials, installed extras
 * Rich treats `[x]` in strings as markup — don't put bracketed text in table cells un-escaped.
 * Tests run with cwd = a tmp dir and a scrubbed `FINSIGHT_*` env (see `tests/conftest.py`).
 
-## Claude API usage (Phase 4+)
-Use the official `anthropic` SDK only. Default model `claude-opus-5`; adaptive thinking;
-stream long outputs; check `stop_reason` (`max_tokens`, `refusal`) before reading content;
-put stable prompt/tool prefix first for caching and verify `cache_read_input_tokens`.
+## Provider and evaluation workflow
 
-## Lessons that cost time (do not repeat)
-* **Scripted `str.replace` patches on files ruff has already reformatted silently match nothing.** Always
-  assert the match count, or use the Edit tool. This once produced a "clean" check that joined no rows.
-* **A check that passes must say how much it checked** (e.g. `identity_periods_checked`).
-* **Never state a finding you have not read off the output** (notebook claims, README prose). Verify first.
-* The gold `test` split was inspected during error analysis: further tuning needs a fresh split (`gold_v2`).
-* Embedded Qdrant holds a process lock - do not run two `finsight` commands that open the index at once.
-* **Slice-replacing a block of `cli.py` can delete the commands next to it** (`serve`/`ui` vanished this way and
-  were only found by starting the server). `tests/unit/test_cli.py::test_every_documented_command_is_registered`
-  guards it; prefer the Edit tool with a unique anchor over index arithmetic.
-* **Read executed notebook output before trusting it.** In pandas, `if row.x:` on a NaN is truthy: notebook 04's
-  bucketing silently counted 9 misses as hits and printed a wrong headline. Use `pd.isna`, and assert that a
-  derived bucket count equals the metric it is meant to explain.
-* **Architecture rules are enforced by `make arch` (import-linter).** Each contract was proven to fail on an
-  injected violation. Keep new shared value objects in `core`, not in the package that first uses them.
-* zsh does not word-split unquoted variables: pipe file lists through `xargs` when running `sed -i`.
-* Long jobs (`finsight index`, ~35 min) run in the background with `nohup`; the index build is resumable.
-* **`DuckDB`/embedded-Qdrant file locks are held for the life of the process, including a long-running
-  `finsight eval run`.** Running `pytest tests/integration` (which opens the real store) at the same time
-  fails every test in that file with `IOException: Could not set lock`. Not a bug - wait for the other
-  process, or use a temp `FINSIGHT_BASE_DIR` for tests that must run concurrently.
-* **A local LLM's default sampling is not reproducible run-to-run** - the same question through the same
-  code returned a different tool call, sometimes a different tool entirely. `generation/ollama.py` sends
-  `temperature=0, seed=0`; any new local-model integration needs the same treatment before its numbers
-  are trustworthy, and it should still be verified empirically (three repeats of one question), not assumed.
-* **A provider-agnostic seam pays for itself.** ADR-0006 built `LLMClient` as a three-method protocol
-  specifically so a second provider could be added later without touching the orchestrator, tools or RAG
-  pipeline; adding Ollama (ADR-0011) touched zero lines in `agent/orchestrator.py` or `agent/tools.py`,
-  confirming the seam worked as designed rather than just in theory.
-* **A weaker model surfaces real bugs a stronger one papers over.** `llama3.2:3b` sent `fiscal_years` as
-  the *string* `"[2024]"` instead of a JSON array, and asked for a ratio through the metric tool instead
-  of the ratio tool - both are now general robustness fixes (`agent/tools._as_list`, a better error
-  message), not model-specific hacks, and both would help Claude too if it ever made the same mistake.
-  Do not chase every quirk a small model has into a narrow patch, though: some (narrating a fake tool
-  call as prose, paraphrasing instead of citing) are genuine small-model limitations to document, not bugs.
-* **`uvicorn.run(..., reload=True)` re-execs the app factory in a fresh subprocess**, so a value only
-  captured in a Python closure (e.g. a CLI flag passed straight into a function argument) does not
-  survive a reload. Set it as an environment variable in the parent process instead (and
-  `get_settings.cache_clear()` if the same process also reads it before reloading) - it is inherited
-  by the subprocess for free, and it is also how `docker-compose.yml`'s `environment:` block or a
-  bare `.env` entry can set the same thing without going through the CLI at all (`finsight serve --llm`).
-* **Verify a new serving path by actually driving it**, not just by testing the handler against fakes:
-  `generation/ollama.py`'s unit tests are all HTTP-mocked, so wiring it into `finsight serve` was
-  additionally checked by starting the real server, a real Streamlit UI, and a real Ollama model, then
-  reading the live `/readyz` and a live `/v1/query` response and clicking through the Ask page in a
-  browser. The unit tests would have stayed green through a wiring mistake the live check would not.
+* Use the official Anthropic SDK for Claude; obtain model IDs from settings rather than this file.
+* Keep provider selection explicit. Check response stop reasons and preserve error reporting.
+* Preserve AI co-author attribution; never claim independent human review of AI-generated work.
+* Consult `docs/DATASET_INTEGRITY.md` before interpreting or changing evaluations. Mechanical
+  scoring does not prevent contamination through development on the scored questions.
+* Do not run the proposed `holdout_v1_draft` against the system before its labels are reviewed.
+* Local sampling uses `temperature=0, seed=0`; this is not a guarantee across model versions or
+  backends. Record model identity and environment for new runs.
+* Do not run commands concurrently against the same embedded Qdrant or DuckDB store.
+* Keep results-generation prose and committed reports consistent. A public clone omits raw
+  `reports/runs/` artifacts; regenerating without them replaces measurements with missing cells.
+* Validate changes with targeted checks and `make check` where dependencies are available.
+  Live provider or serving checks must be reported separately from tests using fakes.
